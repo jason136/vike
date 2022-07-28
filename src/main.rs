@@ -1,7 +1,15 @@
 use winit::{EventsLoop, WindowBuilder, dpi::LogicalSize, Event, WindowEvent};
 use std::sync::Arc;
-use vulkano::instance::{Instance, InstanceExtensions, ApplicationInfo, Version, layers_list};
+use vulkano::instance::{
+    Instance, 
+    InstanceExtensions, 
+    ApplicationInfo, 
+    Version, 
+    layers_list, 
+    PhysicalDevice,
+};
 use vulkano::instance::debug::{DebugCallback, MessageTypes};
+use vulkano::device::{Device, DeviceExtensions, Queue, Features};
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
@@ -14,10 +22,27 @@ const ENABLE_VALIDATION_LAYERS: bool = true;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
+struct QueueFamilyIndices {
+    graphics_family: i32,
+}
+
+impl QueueFamilyIndices {
+    fn new() -> Self {
+        Self { graphics_family: -1 }
+    }
+
+    fn is_complete(&self) -> bool {
+        self.graphics_family >= 0
+    }
+}
+
 struct HelloTriangleApplication {
     instance: Arc<Instance>,
     debug_callback: Option<DebugCallback>,
     events_loop: EventsLoop,
+    pysical_device_index: usize,
+    device: Arc<Device>,
+    graphiscs_queue: Arc<Queue>,
 }
 
 impl HelloTriangleApplication {
@@ -25,11 +50,16 @@ impl HelloTriangleApplication {
         let instance = Self::create_instance();
         let debug_callback = Self::setup_debug_callback(&instance);
         let events_loop = Self::init_window();
+        let pysical_device_index = Self::pick_physical_device(&instance);
+        let (device, graphiscs_queue) = Self::create_logical_device(&instance, pysical_device_index);
 
         Self { 
             instance,
             debug_callback,
-            events_loop, 
+            events_loop,
+            pysical_device_index,
+            device, 
+            graphiscs_queue,
         }
     }
 
@@ -39,7 +69,7 @@ impl HelloTriangleApplication {
         }
 
         let supported_extensions = InstanceExtensions::supported_by_core()
-            .expect("failed to retrieve supported extensions");
+            .expect("Failed to retrieve supported extensions");
         println!("Supported extensions: {:?}", supported_extensions);
 
         let app_info = ApplicationInfo {
@@ -52,11 +82,11 @@ impl HelloTriangleApplication {
         let required_extensions = Self::get_required_extensions();
         if ENABLE_VALIDATION_LAYERS && Self::check_validation_layer_support() {
             Instance::new(Some(&app_info), &required_extensions, VALIDATION_LAYERS.iter().cloned())
-                .expect("failed to create Vulkan instance")
+                .expect("Failed to create Vulkan instance")
         }
         else {
             Instance::new(Some(&app_info), &required_extensions, None)
-                .expect("failed to create Vulkan instance")
+                .expect("Failed to create Vulkan instance")
         }
     }
 
@@ -97,6 +127,45 @@ impl HelloTriangleApplication {
             .with_dimensions(LogicalSize::new(WIDTH as f64, HEIGHT as f64))
             .build(&events_loop);
         events_loop
+    }
+
+    fn pick_physical_device(instance: &Arc<Instance>) -> usize {
+        PhysicalDevice::enumerate(&instance)
+            .position(|device| Self::is_device_suitable(&device)).expect("Failed to find a suitable device")
+    }
+
+    fn is_device_suitable(device: &PhysicalDevice) -> bool {
+        let indices = Self::find_queue_families(device);
+        indices.is_complete()
+    }
+
+    fn find_queue_families(device: &PhysicalDevice) -> QueueFamilyIndices {
+        let mut indices = QueueFamilyIndices::new();
+        for (i, queue_family) in device.queue_families().enumerate() {
+            if queue_family.supports_graphics() {
+                indices.graphics_family = i as i32;
+            }
+
+            if indices.is_complete() {
+                break;
+            }
+        }
+
+        indices
+    }
+
+    fn create_logical_device(instance: &Arc<Instance>, physical_device_index: usize) -> (Arc<Device>, Arc<Queue>) {
+        let physical_device = PhysicalDevice::from_index(&instance, physical_device_index).unwrap();
+        let indices = Self::find_queue_families(&physical_device);
+
+        let queue_family = physical_device.queue_families().nth(indices.graphics_family as usize).unwrap();
+        let queue_priority = 1.0;
+
+        let (device, mut queues) = Device::new(physical_device, &Features::none(), &DeviceExtensions::none(), 
+            [(queue_family, queue_priority)].iter().cloned()).expect("Failed to create logical device");
+
+        let graphics_queue = queues.next().unwrap();
+        (device, graphics_queue)
     }
 
     pub fn main_loop(&mut self) {
