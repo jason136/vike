@@ -1,4 +1,6 @@
 use std::{sync::Arc, time::Instant};
+use bytemuck::{Pod, Zeroable};
+
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
     command_buffer::{
@@ -7,7 +9,7 @@ use vulkano::{
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
-        Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
+        Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo, Queue, 
     },
     format::Format,
     image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
@@ -26,7 +28,7 @@ use vulkano::{
     swapchain::{
         acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError, Surface,
     },
-    sync::{self, FlushError, GpuFuture},
+    sync::{self, FlushError, GpuFuture}, impl_vertex,
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
@@ -34,6 +36,12 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, Zeroable, Pod)]
+struct Vertex {
+    position: [f32; 2],
+}
 
 struct Fraktal {
     instance: Arc<Instance>, 
@@ -43,6 +51,9 @@ struct Fraktal {
     queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Window>>,
     images: Vec<Arc<SwapchainImage<Window>>>, 
+    vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
+    render_pass: Arc<RenderPass>,
+    pipeline: Arc<GraphicsPipeline>,
 }
 
 impl Fraktal {
@@ -128,6 +139,79 @@ impl Fraktal {
             ).unwrap()
         };
 
+        impl_vertex!(Vertex, position);
+
+        let vertices = [
+            Vertex {
+                position: [-0.5, -0.25],
+            },
+            Vertex {
+                position: [0.0, 0.5],
+            },
+            Vertex {
+                position: [0.25, -0.1],
+            },
+        ];
+        let vertex_buffer = CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, vertices).unwrap();
+
+        mod vs {
+            vulkano_shaders::shader! {
+                ty: "vertex",
+                src: "
+                    #version 450
+    
+                    layout(location = 0) in vec2 position;
+    
+                    void main() {
+                        gl_Position = vec4(position, 0.0, 1.0);
+                    }
+                "
+            }
+        }
+    
+        mod fs {
+            vulkano_shaders::shader! {
+                ty: "fragment",
+                src: "
+                    #version 450
+    
+                    layout(location = 0) out vec4 f_color;
+    
+                    void main() {
+                        f_color = vec4(1.0, 0.0, 0.0, 1.0);
+                    }
+                "
+            }
+        }
+    
+        let vs = vs::load(device.clone()).unwrap();
+        let fs = fs::load(device.clone()).unwrap();
+
+        let render_pass = vulkano::single_pass_renderpass!(
+            device.clone(),
+            attachments: {
+                color: {
+                    load: Clear,
+                    store: Store,
+                    format: swapchain.image_format(),
+                    samples: 1,
+                }
+            },
+            pass: {
+                color: [color],
+                depth_stencil: {}
+            }
+        ).unwrap();
+
+        let pipeline = GraphicsPipeline::start()
+            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
+            .input_assembly_state(InputAssemblyState::new())
+            .vertex_shader(vs.entry_point("main").unwrap(), ())
+            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
+            .fragment_shader(fs.entry_point("main").unwrap(), ())
+            .build(device.clone()).unwrap();
+
         Self {
             instance,
             event_loop, 
@@ -136,14 +220,17 @@ impl Fraktal {
             queue, 
             swapchain, 
             images, 
+            vertex_buffer,
+            render_pass,
+            pipeline,
         }
     }
 
-    fn main_loop(&mut self) {
+    fn main_loop(mut self) {
         let mut viewport = Viewport { origin: [0.0, 0.0], dimensions: [0.0, 0.0], depth_range: 0.0..1.0 };
         let mut framebuffers = Fraktal::window_size_dependent_setup(&self.images, self.render_pass.clone(), &mut viewport);
         let mut recreate_swapchain = false;
-        let mut previous_fram_end = Some(sync::now(self.device.clone()).boxed());
+        let mut previous_frame_end = Some(sync::now(self.device.clone()).boxed());
         self.event_loop.run(move |event, _, control_flow| {
             match event {
                 Event::WindowEvent {
@@ -163,7 +250,7 @@ impl Fraktal {
                     if dimensions.width == 0 || dimensions.height == 0 {
                         return;
                     }
-                    previous_fram_end.as_mut().unwrap().cleanup_finished();
+                    previous_frame_end.as_mut().unwrap().cleanup_finished();
 
                     if recreate_swapchain {
                         let (new_swapchain, new_images) = 
@@ -205,20 +292,21 @@ impl Fraktal {
                     ).unwrap();
 
                     builder.begin_render_pass(
-                        RenderPassBeginInfo {
-                            clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())], 
-                            ..RenderPassBeginInfo::framebuffer(framebuffers[image_num].clone())
-                        }, 
-                        SubpassContents::Inline,
-                    ).unwrap()
+                            RenderPassBeginInfo {
+                                clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())],
+                                ..RenderPassBeginInfo::framebuffer(framebuffers[image_num].clone())
+                            },
+                            SubpassContents::Inline,
+                        ).unwrap()
                         .set_viewport(0, [viewport.clone()])
-                        .bind_pipeline_graphics(pipeline.clone())
-                        .draw(vertex_buffer.len() as u32, 1, 0, 0).unwrap()
+                        .bind_pipeline_graphics(self.pipeline.clone())
+                        .bind_vertex_buffers(0, self.vertex_buffer.clone())
+                        .draw(self.vertex_buffer.len() as u32, 1, 0, 0).unwrap()
                         .end_render_pass().unwrap();
-                    
+
                     let command_buffer = builder.build().unwrap();
 
-                    let future = previous_fram_end
+                    let future = previous_frame_end
                         .take().unwrap()
                         .join(acquire_future)
                         .then_execute(self.queue.clone(), command_buffer).unwrap()
@@ -227,15 +315,15 @@ impl Fraktal {
 
                     match future {
                         Ok(future) => {
-                            previous_fram_end = Some(future.boxed());
+                            previous_frame_end = Some(future.boxed());
                         }
                         Err(FlushError::OutOfDate) => {
                             recreate_swapchain = true;
-                            previous_fram_end = Some(sync::now(self.device.clone()).boxed());
+                            previous_frame_end = Some(sync::now(self.device.clone()).boxed());
                         }
                         Err(e) => {
                             println!("Failed to flush future: {:?}", e);
-                            previous_fram_end = Some(sync::now(self.device.clone()).boxed());
+                            previous_frame_end = Some(sync::now(self.device.clone()).boxed());
                         }
                     }
                 }
