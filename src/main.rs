@@ -1,189 +1,271 @@
-use winit::{EventsLoop, WindowBuilder, dpi::LogicalSize, Event, WindowEvent};
-use std::sync::Arc;
-use vulkano::instance::{
-    Instance, 
-    InstanceExtensions, 
-    ApplicationInfo, 
-    Version, 
-    layers_list, 
-    PhysicalDevice,
+use std::{sync::Arc, time::Instant};
+use vulkano::{
+    buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
+    command_buffer::{
+        AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
+    },
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
+    device::{
+        physical::{PhysicalDevice, PhysicalDeviceType},
+        Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
+    },
+    format::Format,
+    image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
+    instance::{Instance, InstanceCreateInfo},
+    pipeline::{
+        graphics::{
+            depth_stencil::DepthStencilState,
+            input_assembly::InputAssemblyState,
+            vertex_input::BuffersDefinition,
+            viewport::{Viewport, ViewportState},
+        },
+        GraphicsPipeline, Pipeline, PipelineBindPoint,
+    },
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    shader::ShaderModule,
+    swapchain::{
+        acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError, Surface,
+    },
+    sync::{self, FlushError, GpuFuture},
 };
-use vulkano::instance::debug::{DebugCallback, MessageTypes};
-use vulkano::device::{Device, DeviceExtensions, Queue, Features};
+use vulkano_win::VkSurfaceBuild;
+use winit::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::{Window, WindowBuilder},
+};
 
-const WIDTH: u32 = 800;
-const HEIGHT: u32 = 600;
-
-const VALIDATION_LAYERS: &[&str] = &[
-    "VK_LAYER_LUNARG_standard_validation",
-];
-#[cfg(all(debug_assertions))]
-const ENABLE_VALIDATION_LAYERS: bool = true;
-#[cfg(not(debug_assertions))]
-const ENABLE_VALIDATION_LAYERS: bool = false;
-
-struct QueueFamilyIndices {
-    graphics_family: i32,
-}
-
-impl QueueFamilyIndices {
-    fn new() -> Self {
-        Self { graphics_family: -1 }
-    }
-
-    fn is_complete(&self) -> bool {
-        self.graphics_family >= 0
-    }
-}
-
-struct HelloTriangleApplication {
-    instance: Arc<Instance>,
-    debug_callback: Option<DebugCallback>,
-    events_loop: EventsLoop,
-    pysical_device_index: usize,
+struct Fraktal {
+    instance: Arc<Instance>, 
+    event_loop: EventLoop<()>,
+    surface: Arc<Surface<Window>>,
     device: Arc<Device>,
-    graphiscs_queue: Arc<Queue>,
+    queue: Arc<Queue>,
+    swapchain: Arc<Swapchain<Window>>,
+    images: Vec<Arc<SwapchainImage<Window>>>, 
 }
 
-impl HelloTriangleApplication {
+impl Fraktal {
     pub fn initialize() -> Self {
-        let instance = Self::create_instance();
-        let debug_callback = Self::setup_debug_callback(&instance);
-        let events_loop = Self::init_window();
-        let pysical_device_index = Self::pick_physical_device(&instance);
-        let (device, graphiscs_queue) = Self::create_logical_device(&instance, pysical_device_index);
+        let required_extensions = vulkano_win::required_extensions();
+        let instance = Instance::new(InstanceCreateInfo { 
+            enabled_extensions: required_extensions,
+            enumerate_portability: true,
+            ..Default::default()
+        }).unwrap();
 
-        Self { 
-            instance,
-            debug_callback,
-            events_loop,
-            pysical_device_index,
-            device, 
-            graphiscs_queue,
-        }
-    }
+        let event_loop = EventLoop::new();
+        let surface = WindowBuilder::new()
+            .build_vk_surface(&event_loop, instance.clone())
+            .unwrap();
 
-    pub fn create_instance() -> Arc<Instance> {
-        if ENABLE_VALIDATION_LAYERS && !Self::check_validation_layer_support() {
-            panic!("Validation layers requested, but not available!");
-        }
-
-        let supported_extensions = InstanceExtensions::supported_by_core()
-            .expect("Failed to retrieve supported extensions");
-        println!("Supported extensions: {:?}", supported_extensions);
-
-        let app_info = ApplicationInfo {
-            application_name: Some("Hello Triangle".into()), 
-            application_version: Some(Version { major: 1, minor: 0, patch: 0 }),
-            engine_name: Some("No Engine".into()),
-            engine_version: Some(Version { major: 1, minor: 0, patch: 0 }),
+        let device_extensions = DeviceExtensions {
+            khr_swapchain: true, 
+            ..DeviceExtensions::none()
         };
 
-        let required_extensions = Self::get_required_extensions();
-        if ENABLE_VALIDATION_LAYERS && Self::check_validation_layer_support() {
-            Instance::new(Some(&app_info), &required_extensions, VALIDATION_LAYERS.iter().cloned())
-                .expect("Failed to create Vulkan instance")
-        }
-        else {
-            Instance::new(Some(&app_info), &required_extensions, None)
-                .expect("Failed to create Vulkan instance")
-        }
-    }
-
-    fn check_validation_layer_support() -> bool {
-        let layers: Vec<_> = layers_list().unwrap().map(|l| l.name().to_owned()).collect();
-        VALIDATION_LAYERS.iter().all(|layer_name| layers.contains(&layer_name.to_string()))
-    }
-
-    fn get_required_extensions() -> InstanceExtensions {
-        let mut extensions = vulkano_win::required_extensions();
-        if ENABLE_VALIDATION_LAYERS {
-            extensions.ext_debug_report = true;
-        }
-        extensions
-    }
-
-    fn setup_debug_callback(instance: &Arc<Instance>) -> Option<DebugCallback> {
-        if !ENABLE_VALIDATION_LAYERS {
-            return None;
-        }
-
-        let msg_types = MessageTypes {
-            error: true,
-            warning: true,
-            performance_warning: true,
-            information: false,
-            debug: true,
-        };
-        DebugCallback::new(&instance, msg_types, |msg| {
-            println!("validation layer: {:?}", msg.description);
-        }).ok()
-    }
-
-    pub fn init_window() -> EventsLoop {
-        let events_loop = EventsLoop::new();
-        let _window = WindowBuilder::new()
-            .with_title("Vulkan")
-            .with_dimensions(LogicalSize::new(WIDTH as f64, HEIGHT as f64))
-            .build(&events_loop);
-        events_loop
-    }
-
-    fn pick_physical_device(instance: &Arc<Instance>) -> usize {
-        PhysicalDevice::enumerate(&instance)
-            .position(|device| Self::is_device_suitable(&device)).expect("Failed to find a suitable device")
-    }
-
-    fn is_device_suitable(device: &PhysicalDevice) -> bool {
-        let indices = Self::find_queue_families(device);
-        indices.is_complete()
-    }
-
-    fn find_queue_families(device: &PhysicalDevice) -> QueueFamilyIndices {
-        let mut indices = QueueFamilyIndices::new();
-        for (i, queue_family) in device.queue_families().enumerate() {
-            if queue_family.supports_graphics() {
-                indices.graphics_family = i as i32;
-            }
-
-            if indices.is_complete() {
-                break;
-            }
-        }
-
-        indices
-    }
-
-    fn create_logical_device(instance: &Arc<Instance>, physical_device_index: usize) -> (Arc<Device>, Arc<Queue>) {
-        let physical_device = PhysicalDevice::from_index(&instance, physical_device_index).unwrap();
-        let indices = Self::find_queue_families(&physical_device);
-
-        let queue_family = physical_device.queue_families().nth(indices.graphics_family as usize).unwrap();
-        let queue_priority = 1.0;
-
-        let (device, mut queues) = Device::new(physical_device, &Features::none(), &DeviceExtensions::none(), 
-            [(queue_family, queue_priority)].iter().cloned()).expect("Failed to create logical device");
-
-        let graphics_queue = queues.next().unwrap();
-        (device, graphics_queue)
-    }
-
-    pub fn main_loop(&mut self) {
-        loop {
-            let mut done = false;
-            self.events_loop.poll_events(|event| {
-                if let Event::WindowEvent { event: WindowEvent::CloseRequested, .. } = event {
-                    done = true;
+        let (physical_device, queue_family) = PhysicalDevice::enumerate(&instance)
+            .filter(|&p| {
+                p.supported_extensions().is_superset_of(&device_extensions)
+            })
+            .filter_map(|p| {
+                p.queue_families().find(|&q| {
+                    q.supports_graphics() && q.supports_surface(&surface).unwrap_or(false)
+                })
+                .map(|q| (p, q))
+            })
+            .min_by_key(|(p, _)| {
+                match p.properties().device_type {
+                    PhysicalDeviceType::DiscreteGpu => 0,
+                    PhysicalDeviceType::IntegratedGpu => 1,
+                    PhysicalDeviceType::VirtualGpu => 2,
+                    PhysicalDeviceType::Cpu => 3,
+                    PhysicalDeviceType::Other => 4,
                 }
-            });
-            if done {
-                return
-            }
+            }).expect("No suitable physical device found.");
+
+        println!(
+            "Using device: {} (type: {:?})",
+            physical_device.properties().device_name,
+            physical_device.properties().device_type
+        );
+
+        let (device, mut queues) = Device::new(
+            physical_device,
+            DeviceCreateInfo {
+                enabled_extensions: device_extensions,
+                queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
+                ..Default::default()
+            },
+        ).unwrap();
+        let queue = queues.next().unwrap();
+
+        let (mut swapchain, images) = {
+            let surface_capabilities = physical_device
+                .surface_capabilities(&surface, Default::default())
+                .expect("Failed to get surface capabilities");
+            let image_format = Some(
+                physical_device
+                    .surface_formats(&surface, Default::default())
+                    .unwrap()[0].0,
+            );
+
+            Swapchain::new(
+                device.clone(), 
+                surface.clone(), 
+                SwapchainCreateInfo {
+                    min_image_count: surface_capabilities.min_image_count,
+                    image_format,
+                    image_extent: surface.window().inner_size().into(),
+                    image_usage: ImageUsage::color_attachment(), 
+                    composite_alpha: surface_capabilities
+                        .supported_composite_alpha
+                        .iter()
+                        .next()
+                        .unwrap(),
+                    ..Default::default()
+                }
+            ).unwrap()
+        };
+
+        Self {
+            instance,
+            event_loop, 
+            surface, 
+            device, 
+            queue, 
+            swapchain, 
+            images, 
         }
+    }
+
+    fn main_loop(&mut self) {
+        let mut viewport = Viewport { origin: [0.0, 0.0], dimensions: [0.0, 0.0], depth_range: 0.0..1.0 };
+        let mut framebuffers = Fraktal::window_size_dependent_setup(&self.images, self.render_pass.clone(), &mut viewport);
+        let mut recreate_swapchain = false;
+        let mut previous_fram_end = Some(sync::now(self.device.clone()).boxed());
+        self.event_loop.run(move |event, _, control_flow| {
+            match event {
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested, 
+                    ..
+                } => {
+                    *control_flow = ControlFlow::Exit;
+                }
+                Event::WindowEvent { 
+                    event: WindowEvent::Resized(_), 
+                    ..
+                 } => {
+                    recreate_swapchain = true;
+                 }
+                 Event::RedrawEventsCleared => {
+                    let dimensions = self.surface.window().inner_size();
+                    if dimensions.width == 0 || dimensions.height == 0 {
+                        return;
+                    }
+                    previous_fram_end.as_mut().unwrap().cleanup_finished();
+
+                    if recreate_swapchain {
+                        let (new_swapchain, new_images) = 
+                            match self.swapchain.recreate(SwapchainCreateInfo {
+                                image_extent: dimensions.into(), 
+                                ..self.swapchain.create_info()
+                            }) {
+                                Ok(r) => r, 
+                                Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
+                                Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+                            };
+
+                        self.swapchain = new_swapchain;
+                        framebuffers = Fraktal::window_size_dependent_setup(
+                            &new_images, 
+                            self.render_pass.clone(), 
+                            &mut viewport,
+                        );
+                        recreate_swapchain = false;
+                    }
+
+                    let (image_num, suboptimal, acquire_future) = 
+                        match acquire_next_image(self.swapchain.clone(), None) {
+                            Ok(r) => r, 
+                            Err(AcquireError::OutOfDate) => {
+                                recreate_swapchain = true;
+                                return;
+                            }
+                            Err(e) => panic!("Failed to acquire next image: {:?}", e),
+                        };
+                    if suboptimal {
+                        recreate_swapchain = true;
+                    }
+
+                    let mut builder = AutoCommandBufferBuilder::primary(
+                        self.device.clone(), 
+                        self.queue.family(), 
+                        CommandBufferUsage::OneTimeSubmit,
+                    ).unwrap();
+
+                    builder.begin_render_pass(
+                        RenderPassBeginInfo {
+                            clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())], 
+                            ..RenderPassBeginInfo::framebuffer(framebuffers[image_num].clone())
+                        }, 
+                        SubpassContents::Inline,
+                    ).unwrap()
+                        .set_viewport(0, [viewport.clone()])
+                        .bind_pipeline_graphics(pipeline.clone())
+                        .draw(vertex_buffer.len() as u32, 1, 0, 0).unwrap()
+                        .end_render_pass().unwrap();
+                    
+                    let command_buffer = builder.build().unwrap();
+
+                    let future = previous_fram_end
+                        .take().unwrap()
+                        .join(acquire_future)
+                        .then_execute(self.queue.clone(), command_buffer).unwrap()
+                        .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), image_num)
+                        .then_signal_fence_and_flush();
+
+                    match future {
+                        Ok(future) => {
+                            previous_fram_end = Some(future.boxed());
+                        }
+                        Err(FlushError::OutOfDate) => {
+                            recreate_swapchain = true;
+                            previous_fram_end = Some(sync::now(self.device.clone()).boxed());
+                        }
+                        Err(e) => {
+                            println!("Failed to flush future: {:?}", e);
+                            previous_fram_end = Some(sync::now(self.device.clone()).boxed());
+                        }
+                    }
+                }
+                _ => (),
+            }
+        });
+    }
+
+    fn window_size_dependent_setup(
+        images: &[Arc<SwapchainImage<Window>>],
+        render_pass: Arc<RenderPass>, 
+        viewport: &mut Viewport,
+    ) -> Vec<Arc<Framebuffer>> {
+        let dimensions = images[0].dimensions().width_height();
+        viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
+
+        images.iter().map(|image| {
+            let view = ImageView::new_default(image.clone()).unwrap();
+            Framebuffer::new(
+                render_pass.clone(), 
+                FramebufferCreateInfo {
+                    attachments: vec![view],
+                    ..Default::default()
+                },
+            ).unwrap()
+        }).collect::<Vec<_>>()
     }
 }
 
-fn main () {
-    let mut app = HelloTriangleApplication::initialize();
-    app.main_loop();
+fn main() {
+    let mut fraktal = Fraktal::initialize();
+    fraktal.main_loop();
 }
