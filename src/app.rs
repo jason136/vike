@@ -9,17 +9,22 @@ use vulkano::{
         physical::{PhysicalDevice, PhysicalDeviceType},
         Device, DeviceCreateInfo, DeviceExtensions, Features, QueueCreateInfo, Queue, 
     },
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
+    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, SampleCount},
     impl_vertex,
     instance::{Instance, InstanceCreateInfo},
     pipeline::{
         graphics::{
-            input_assembly::InputAssemblyState,
+            input_assembly::{InputAssemblyState, PrimitiveTopology, }, 
             render_pass::PipelineRenderingCreateInfo,
+            rasterization::{RasterizationState, PolygonMode, CullMode, FrontFace},
+            multisample::{MultisampleState},
+            color_blend::{ColorBlendAttachmentState, ColorBlendState},
+            depth_stencil::{DepthStencilState, DepthState, CompareOp},
             vertex_input::BuffersDefinition,
-            viewport::{Viewport, ViewportState},
+            viewport::{Viewport, ViewportState, Scissor},
         },
-        GraphicsPipeline, PipelineLayout, layout::PipelineLayoutCreateInfo,
+        layout::PipelineLayoutCreateInfo,
+        GraphicsPipeline, PipelineLayout, StateMode, PartialStateMode,
     },
     render_pass::{LoadOp, StoreOp},
     swapchain::{
@@ -162,22 +167,82 @@ impl FkApp {
         let vs = vs::load(device.clone()).expect("Failed to create vertex shader module");
         let fs = fs::load(device.clone()).expect("Failed to create fragment shader module");
 
-        let pipeline_layout = PipelineLayout::new(device.clone(), PipelineLayoutCreateInfo{
-            set_layouts: vec![],
+        let input_assembly_state = InputAssemblyState {
+            topology: PartialStateMode::Fixed(PrimitiveTopology::TriangleList),
             ..Default::default()
-        }).expect("Failed to create pipeline layout");
+        };
+        
+        let viewport = Viewport {
+            origin: [0.0, 0.0],
+            dimensions: [
+                swapchain.surface().window().inner_size().width as f32, 
+                swapchain.surface().window().inner_size().height as f32
+            ],
+            depth_range: 0.0..1.0,
+        };
+        let scissor = Scissor {
+            origin: [0, 0],
+            dimensions: [
+                swapchain.surface().window().inner_size().width as u32, 
+                swapchain.surface().window().inner_size().height as u32
+            ],
+        };
+
+        let rasterization_state = RasterizationState{ 
+            depth_clamp_enable: false,
+            rasterizer_discard_enable: StateMode::Fixed(false),
+            polygon_mode: PolygonMode::Fill,
+            line_width: StateMode::Fixed(1.0),
+            cull_mode: StateMode::Fixed(CullMode::None),
+            front_face: StateMode::Fixed(FrontFace::Clockwise),
+            depth_bias: None,
+            ..Default::default() 
+        };
+
+        let multisample_state = MultisampleState {
+            rasterization_samples: SampleCount::Sample1,
+            sample_shading: None,
+            ..Default::default()
+        };
+
+        let color_blend_state = ColorBlendState {
+            logic_op: None, 
+            ..Default::default()
+        };
+
+        let depth_stencil_state = DepthStencilState {
+            depth: Some(DepthState{
+                enable_dynamic: false, 
+                write_enable: StateMode::Fixed(true),
+                compare_op: StateMode::Fixed(CompareOp::Less),
+            }),
+            ..Default::default()
+        };
+
+        let pipeline_layout = PipelineLayout::new(
+            device.clone(), 
+            PipelineLayoutCreateInfo{
+                set_layouts: vec![],
+                push_constant_ranges: vec![],
+                ..Default::default()
+            }
+        ).expect("Failed to create pipeline layout");
 
         let pipeline = GraphicsPipeline::start()
             .render_pass(PipelineRenderingCreateInfo {
                 color_attachment_formats: vec![Some(swapchain.image_format())], 
                 ..Default::default()
             })
-            //.vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
-            .input_assembly_state(InputAssemblyState::new())
+            .input_assembly_state(input_assembly_state)
+            .viewport_state(ViewportState::viewport_fixed_scissor_fixed(vec![(viewport, scissor)]))
+            .rasterization_state(rasterization_state)
+            .multisample_state(multisample_state)
+            .color_blend_state(color_blend_state)
+            .depth_stencil_state(depth_stencil_state)
             .vertex_shader(vs.entry_point("main").expect("Failed to set vertex shader"), ())
-            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
             .fragment_shader(fs.entry_point("main").expect("Failed to set fragment shader"), ())
-            .with_pipeline_layout(device.clone(), pipeline_layout).unwrap();
+            .with_pipeline_layout(device.clone(), pipeline_layout)
+            .expect("Failed to create graphics pipeline");
         pipeline
     }
 
