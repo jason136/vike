@@ -54,6 +54,13 @@ mod fs {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+struct Vertex {
+    position: [f32; 2],
+}
+impl_vertex!(Vertex, position);
+
 pub struct FkApp {
     event_loop: EventLoop<()>,
     surface: Arc<Surface<Window>>,
@@ -191,7 +198,11 @@ impl FkApp {
         render_pass
     }
 
-    fn create_pipeline(device: Arc<Device>, swapchain: Arc<Swapchain<Window>>, render_pass: Arc<RenderPass>) -> Arc<GraphicsPipeline> {
+    fn create_pipeline(
+        device: Arc<Device>, 
+        swapchain: Arc<Swapchain<Window>>, 
+        render_pass: Arc<RenderPass>
+    ) -> Arc<GraphicsPipeline> {
         let vs = vs::load(device.clone()).expect("Failed to create vertex shader module");
         let fs = fs::load(device.clone()).expect("Failed to create fragment shader module");
 
@@ -258,6 +269,7 @@ impl FkApp {
 
         let pipeline = GraphicsPipeline::start()
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
             .input_assembly_state(input_assembly_state)
             .viewport_state(ViewportState::viewport_fixed_scissor_fixed(vec![(viewport, scissor)]))
             .rasterization_state(rasterization_state)
@@ -269,6 +281,11 @@ impl FkApp {
             .with_pipeline_layout(device.clone(), pipeline_layout)
             .expect("Failed to create graphics pipeline");
         pipeline
+    }
+
+    fn create_vertex_buffer(device: Arc<Device>, vertices: Vec<Vertex>) -> Arc<CpuAccessibleBuffer<[Vertex]>>{
+        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::vertex_buffer(), false, vertices)
+            .expect("Failed to create vertex buffer")
     }
 
     fn create_framebuffers(
@@ -301,6 +318,7 @@ impl FkApp {
         swapchain: Arc<Swapchain<Window>>, 
         pipeline: Arc<GraphicsPipeline>, 
         framebuffers: Vec<Arc<Framebuffer>>,
+        vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
     ) -> PrimaryAutoCommandBuffer {
         let mut builder = AutoCommandBufferBuilder::primary(
             device.clone(), 
@@ -319,7 +337,8 @@ impl FkApp {
                 SubpassContents::Inline,
             ).unwrap()
             .bind_pipeline_graphics(pipeline.clone())
-            .draw(3, 1, 0, 0).unwrap()
+            .bind_vertex_buffers(0, vertex_buffer.clone())
+            .draw(vertex_buffer.len() as u32, 1, 0, 0).unwrap()
             .end_render_pass().unwrap();
         let command_buffer = builder.build().unwrap();
 
@@ -352,13 +371,31 @@ impl FkApp {
         let (swapchain, images) = FkApp::create_swapchain(surface.clone(), device.clone());
         let render_pass = FkApp::create_render_pass(device.clone(), swapchain.clone());
         let pipeline = FkApp::create_pipeline(device.clone(), swapchain.clone(), render_pass.clone());
+
+        let vertices = vec![
+            Vertex { position: [0.0, -0.5] },
+            Vertex { position: [0.5, 0.5] },
+            Vertex { position: [-0.5, 0.5] },
+            Vertex { position: [0.0, -1.0] },
+            Vertex { position: [0.5, 0.0] },
+            Vertex { position: [-0.5, 0.0] },
+        ];
+        let vertex_buffer = FkApp::create_vertex_buffer(device.clone(), vertices);
+
         let mut viewport = Viewport {
             origin: [0.0, 0.0],
             dimensions: [0.0, 0.0],
             depth_range: 0.0..1.0,
         };
         let framebuffers = FkApp::create_framebuffers(&images, render_pass.clone(), &mut viewport);
-        let command_buffer = FkApp::create_command_buffers(device.clone(), queue.clone(), swapchain.clone(), pipeline.clone(), framebuffers.clone());
+        let command_buffer = FkApp::create_command_buffers(
+            device.clone(), 
+            queue.clone(), 
+            swapchain.clone(), 
+            pipeline.clone(), 
+            framebuffers.clone(), 
+            vertex_buffer
+        );
 
         FkApp::draw_frame(swapchain.clone(), command_buffer, device.clone(), queue.clone());
 
