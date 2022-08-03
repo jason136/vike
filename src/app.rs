@@ -9,6 +9,7 @@ use vulkano::{
         physical::{PhysicalDevice, PhysicalDeviceType},
         Device, DeviceCreateInfo, DeviceExtensions, Features, QueueCreateInfo, Queue, 
     },
+    format::Format,
     image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, SampleCount},
     impl_vertex,
     instance::{Instance, InstanceCreateInfo},
@@ -23,13 +24,14 @@ use vulkano::{
             vertex_input::BuffersDefinition,
             viewport::{Viewport, ViewportState, Scissor},
         },
-        layout::PipelineLayoutCreateInfo,
-        GraphicsPipeline, PipelineLayout, StateMode, PartialStateMode,
+        layout::{PipelineLayoutCreateInfo, PushConstantRange},
+        GraphicsPipeline, PipelineLayout, StateMode, PartialStateMode, Pipeline,
     },
     render_pass::{RenderPass, LoadOp, StoreOp, Subpass, Framebuffer, FramebufferCreateInfo},
     swapchain::{
-        acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError, Surface, self, 
+        acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError, Surface, self, ColorSpace, PresentMode,
     },
+    shader::{ShaderStages, },
     sync::{self, FlushError, GpuFuture},
 };
 use vulkano_win::VkSurfaceBuild;
@@ -58,8 +60,9 @@ mod fs {
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 struct Vertex {
     position: [f32; 2],
+    color: [f32; 3],
 }
-impl_vertex!(Vertex, position);
+impl_vertex!(Vertex, position, color);
 
 pub struct FkApp {
     event_loop: EventLoop<()>,
@@ -70,9 +73,9 @@ pub struct FkApp {
     swapchain: Arc<Swapchain<Window>>,
     pipeline: Arc<GraphicsPipeline>,
     render_pass: Arc<RenderPass>,
+    vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
     viewport: Viewport,
     framebuffers: Vec<Arc<Framebuffer>>,
-    //command_buffer: PrimaryAutoCommandBuffer,
 }
 
 impl FkApp {
@@ -91,7 +94,7 @@ impl FkApp {
         let surface = WindowBuilder::new()
             .with_title(title)
             .with_inner_size(LogicalSize::new(width as f64, height as f64))
-            .with_resizable(false)
+            .with_resizable(true)
             .build_vk_surface(&event_loop, instance.clone())
             .expect("Failed to create surface");
         (event_loop, surface)
@@ -153,29 +156,33 @@ impl FkApp {
             let surface_capabilities = device.physical_device()
                 .surface_capabilities(&surface, Default::default())
                 .expect("Failed to get surface capabilities");
-            let image_format = Some(
+            let available_image_formats = Some(
                 device.physical_device()
                     .surface_formats(&surface, Default::default())
-                    .unwrap()[0].0,
-            );
+                    .expect("Failed to get available image formats"),
+            ).unwrap();
+            let mut image_format = (Format::B8G8R8A8_SRGB, ColorSpace::SrgbNonLinear);
+            if !available_image_formats.contains(&image_format) {
+                image_format = available_image_formats[0];
+            }
 
             Swapchain::new(
                 device.clone(), 
                 surface.clone(), 
                 SwapchainCreateInfo {
                     min_image_count: surface_capabilities.min_image_count,
-                    image_format,
+                    image_format: Some(image_format.0),
+                    image_color_space: image_format.1,
                     image_extent: surface.window().inner_size().into(),
                     image_usage: ImageUsage::color_attachment(), 
                     composite_alpha: surface_capabilities
-                        .supported_composite_alpha
-                        .iter()
-                        .next()
-                        .unwrap(),
+                        .supported_composite_alpha.iter().next().unwrap(),
+                    present_mode: PresentMode::Fifo,
                     ..Default::default()
                 }
             ).expect("Failed to create swapchain")
         };
+
         (swapchain, images)
     }
 
@@ -200,7 +207,6 @@ impl FkApp {
 
     fn create_pipeline(
         device: Arc<Device>, 
-        swapchain: Arc<Swapchain<Window>>, 
         render_pass: Arc<RenderPass>
     ) -> Arc<GraphicsPipeline> {
         let vs = vs::load(device.clone()).expect("Failed to create vertex shader module");
@@ -209,22 +215,6 @@ impl FkApp {
         let input_assembly_state = InputAssemblyState {
             topology: PartialStateMode::Fixed(PrimitiveTopology::TriangleList),
             ..Default::default()
-        };
-        
-        let viewport = Viewport {
-            origin: [0.0, 0.0],
-            dimensions: [
-                swapchain.surface().window().inner_size().width as f32, 
-                swapchain.surface().window().inner_size().height as f32
-            ],
-            depth_range: 0.0..1.0,
-        };
-        let scissor = Scissor {
-            origin: [0, 0],
-            dimensions: [
-                swapchain.surface().window().inner_size().width as u32, 
-                swapchain.surface().window().inner_size().height as u32
-            ],
         };
 
         let rasterization_state = RasterizationState{ 
@@ -251,18 +241,27 @@ impl FkApp {
 
         let depth_stencil_state = DepthStencilState {
             depth: Some(DepthState{
-                enable_dynamic: false, 
+                enable_dynamic: true, 
                 write_enable: StateMode::Fixed(true),
                 compare_op: StateMode::Fixed(CompareOp::Less),
             }),
             ..Default::default()
         };
 
+        let push_constant_range = PushConstantRange {
+            stages: ShaderStages {
+                vertex: true, 
+                fragment: true,
+                ..Default::default()
+            },
+            offset: 0,
+            size: std::mem::size_of::<vs::ty::PushConstantData>() as u32,
+        };
         let pipeline_layout = PipelineLayout::new(
             device.clone(), 
             PipelineLayoutCreateInfo{
                 set_layouts: vec![],
-                push_constant_ranges: vec![],
+                push_constant_ranges: vec![push_constant_range],
                 ..Default::default()
             }
         ).expect("Failed to create pipeline layout");
@@ -270,16 +269,17 @@ impl FkApp {
         let pipeline = GraphicsPipeline::start()
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
             .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
+            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
             .input_assembly_state(input_assembly_state)
-            .viewport_state(ViewportState::viewport_fixed_scissor_fixed(vec![(viewport, scissor)]))
             .rasterization_state(rasterization_state)
             .multisample_state(multisample_state)
             .color_blend_state(color_blend_state)
             .depth_stencil_state(depth_stencil_state)
             .vertex_shader(vs.entry_point("main").expect("Failed to set vertex shader"), ())
             .fragment_shader(fs.entry_point("main").expect("Failed to set fragment shader"), ())
-            .with_pipeline_layout(device.clone(), pipeline_layout)
+            .with_pipeline_layout(device.clone(), pipeline_layout.clone())
             .expect("Failed to create graphics pipeline");
+        
         pipeline
     }
 
@@ -297,8 +297,7 @@ impl FkApp {
         viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
     
         images
-            .iter()
-            .map(|image| {
+            .iter().map(|image| {
                 let view = ImageView::new_default(image.clone()).unwrap();
                 Framebuffer::new(
                     render_pass.clone(),
@@ -317,13 +316,16 @@ impl FkApp {
         queue: Arc<Queue>, 
         swapchain: Arc<Swapchain<Window>>, 
         pipeline: Arc<GraphicsPipeline>, 
+        viewport: &mut Viewport,
         framebuffers: Vec<Arc<Framebuffer>>,
         vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
+        image_index: usize,
+        frame: u32,
     ) -> PrimaryAutoCommandBuffer {
         let mut builder = AutoCommandBufferBuilder::primary(
             device.clone(), 
             queue.family(), 
-            CommandBufferUsage::MultipleSubmit,
+            CommandBufferUsage::OneTimeSubmit,
         ).unwrap();
 
         builder
@@ -331,15 +333,26 @@ impl FkApp {
                 RenderPassBeginInfo {
                     render_area_offset: [0, 0],
                     render_area_extent: swapchain.image_extent(),
-                    clear_values: vec![Some([0.1, 0.1, 0.1, 1.0].into())],
-                    ..RenderPassBeginInfo::framebuffer(framebuffers[0].clone())
+                    clear_values: vec![Some([0.01, 0.01, 0.01, 1.0].into())],
+                    ..RenderPassBeginInfo::framebuffer(framebuffers[image_index].clone())
                 },
                 SubpassContents::Inline,
             ).unwrap()
+            .set_viewport(0, [viewport.clone()])
             .bind_pipeline_graphics(pipeline.clone())
-            .bind_vertex_buffers(0, vertex_buffer.clone())
-            .draw(vertex_buffer.len() as u32, 1, 0, 0).unwrap()
-            .end_render_pass().unwrap();
+            .bind_vertex_buffers(0, vertex_buffer.clone());
+            
+        for i in 0..4 {
+            let push_constants = vs::ty::PushConstantData {
+                offset: [-0.5 + frame as f32 * 0.02, -0.4 + i as f32 * 0.25],
+                color: [0.0, 0.0, 0.2 + 0.2 * i as f32],
+                _dummy0: [0, 0, 0, 0, 0, 0, 0, 0],
+            };
+            builder.push_constants(pipeline.layout().clone(), 0, push_constants)
+            .draw(vertex_buffer.len() as u32, 1, 0, 0).unwrap();
+        }
+
+        builder.end_render_pass().unwrap();
         let command_buffer = builder.build().unwrap();
 
         command_buffer
@@ -370,15 +383,12 @@ impl FkApp {
         let (device, queue) = FkApp::create_device(instance.clone(), surface.clone());
         let (swapchain, images) = FkApp::create_swapchain(surface.clone(), device.clone());
         let render_pass = FkApp::create_render_pass(device.clone(), swapchain.clone());
-        let pipeline = FkApp::create_pipeline(device.clone(), swapchain.clone(), render_pass.clone());
+        let pipeline = FkApp::create_pipeline(device.clone(), render_pass.clone());
 
         let vertices = vec![
-            Vertex { position: [0.0, -0.5] },
-            Vertex { position: [0.5, 0.5] },
-            Vertex { position: [-0.5, 0.5] },
-            Vertex { position: [0.0, -1.0] },
-            Vertex { position: [0.5, 0.0] },
-            Vertex { position: [-0.5, 0.0] },
+            Vertex { position: [0.0, -0.5], color: [1.0, 0.0, 0.0] },
+            Vertex { position: [0.5, 0.5], color: [0.0, 1.0, 0.0] },
+            Vertex { position: [-0.5, 0.5], color: [0.0, 0.0, 1.0] },
         ];
         let vertex_buffer = FkApp::create_vertex_buffer(device.clone(), vertices);
 
@@ -388,16 +398,6 @@ impl FkApp {
             depth_range: 0.0..1.0,
         };
         let framebuffers = FkApp::create_framebuffers(&images, render_pass.clone(), &mut viewport);
-        let command_buffer = FkApp::create_command_buffers(
-            device.clone(), 
-            queue.clone(), 
-            swapchain.clone(), 
-            pipeline.clone(), 
-            framebuffers.clone(), 
-            vertex_buffer
-        );
-
-        FkApp::draw_frame(swapchain.clone(), command_buffer, device.clone(), queue.clone());
 
         Self { 
             event_loop,
@@ -408,15 +408,16 @@ impl FkApp {
             swapchain, 
             pipeline,
             render_pass,
+            vertex_buffer,
             viewport, 
             framebuffers, 
-            //command_buffer,
         }
     }
 
     pub fn main_loop(mut self) {
         let mut recreate_swapchain = false;
         let mut previous_frame_end = Some(sync::now(self.device.clone()).boxed());
+        let mut frame = 0;
 
         self.event_loop.run(move |event, _, control_flow| {
             match event {
@@ -432,63 +433,81 @@ impl FkApp {
                  } => {
                     recreate_swapchain = true;
                  }
-                 Event::RedrawEventsCleared => {
+                Event::RedrawEventsCleared => {
+                    let dimensions = self.surface.window().inner_size();
+                    if dimensions.width == 0 || dimensions.height == 0 {
+                        return;
+                    }
 
-                    // let dimensions = self.surface.window().inner_size();
-                    // if dimensions.width == 0 || dimensions.height == 0 {
-                    //     return;
-                    // }
-                    // previous_frame_end.as_mut().unwrap().cleanup_finished();
+                    previous_frame_end.as_mut().unwrap().cleanup_finished();
 
-                    // if recreate_swapchain {
-                    //     let (new_swapchain, new_images) = 
-                    //         match self.swapchain.recreate(SwapchainCreateInfo {
-                    //             image_extent: dimensions.into(), 
-                    //             ..self.swapchain.create_info()
-                    //         }) {
-                    //             Ok(r) => r, 
-                    //             Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
-                    //             Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-                    //         };
+                    if recreate_swapchain {
+                        let (new_swapchain, new_images) =
+                            match self.swapchain.recreate(SwapchainCreateInfo {
+                                image_extent: dimensions.into(),
+                                ..self.swapchain.create_info()
+                            }) {
+                                Ok(r) => r,
+                                Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
+                                Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+                            };
 
-                    //     self.swapchain = new_swapchain;
-                    //     self.framebuffers = FkApp::create_framebuffers(&new_images, self.render_pass.clone(), &mut self.viewport);
-                    //     recreate_swapchain = false;
-                    // }
+                        self.swapchain = new_swapchain;
+                        self.framebuffers = FkApp::create_framebuffers(
+                            &new_images,
+                            self.render_pass.clone(),
+                            &mut self.viewport,
+                        );
+                        recreate_swapchain = false;
+                    }
 
-                    // let (image_num, suboptimal, acquire_future) = 
-                    //     match acquire_next_image(self.swapchain.clone(), None) {
-                    //         Ok(r) => r, 
-                    //         Err(AcquireError::OutOfDate) => {
-                    //             recreate_swapchain = true;
-                    //             return;
-                    //         }
-                    //         Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                    //     };
-                    // if suboptimal {
-                    //     recreate_swapchain = true;
-                    // }
+                    let (image_num, suboptimal, acquire_future) =
+                        match acquire_next_image(self.swapchain.clone(), None) {
+                            Ok(r) => r,
+                            Err(AcquireError::OutOfDate) => {
+                                recreate_swapchain = true;
+                                return;
+                            }
+                            Err(e) => panic!("Failed to acquire next image: {:?}", e),
+                        };
+                    if suboptimal {
+                        recreate_swapchain = true;
+                    }
 
-                    // let future = previous_frame_end
-                    //     .take().unwrap()
-                    //     .join(acquire_future)
-                    //     .then_execute(self.queue.clone(), command_buffer).unwrap()
-                    //     .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), image_num)
-                    //     .then_signal_fence_and_flush();
+                    frame += 1;
+                    let command_buffer = FkApp::create_command_buffers(
+                        self.device.clone(), 
+                        self.queue.clone(), 
+                        self.swapchain.clone(), 
+                        self.pipeline.clone(), 
+                        &mut self.viewport.clone(),
+                        self.framebuffers.clone(), 
+                        self.vertex_buffer.clone(),
+                        image_num, 
+                        frame
+                    );
+                    frame %= 100;
 
-                    // match future {
-                    //     Ok(future) => {
-                    //         previous_frame_end = Some(future.boxed());
-                    //     }
-                    //     Err(FlushError::OutOfDate) => {
-                    //         recreate_swapchain = true;
-                    //         previous_frame_end = Some(sync::now(self.device.clone()).boxed());
-                    //     }
-                    //     Err(e) => {
-                    //         println!("Failed to flush future: {:?}", e);
-                    //         previous_frame_end = Some(sync::now(self.device.clone()).boxed());
-                    //     }
-                    // }
+                    let future = previous_frame_end
+                        .take().unwrap()
+                        .join(acquire_future)
+                        .then_execute(self.queue.clone(), command_buffer).unwrap()
+                        .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), image_num)
+                        .then_signal_fence_and_flush();
+
+                    match future {
+                        Ok(future) => {
+                            previous_frame_end = Some(future.boxed());
+                        }
+                        Err(FlushError::OutOfDate) => {
+                            recreate_swapchain = true;
+                            previous_frame_end = Some(sync::now(self.device.clone()).boxed());
+                        }
+                        Err(e) => {
+                            println!("Failed to flush future: {:?}", e);
+                            previous_frame_end = Some(sync::now(self.device.clone()).boxed());
+                        }
+                    }
                 }
                 _ => (),
             }
