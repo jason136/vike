@@ -10,6 +10,8 @@ vulkano = "0.30.0"
 vulkano-win = "0.30.0"
 vulkano-shaders = "0.30.0"
 
-winit = "0.26"
-
 bytemuck = { version = "1.7", features = ["derive", "extern_crate_std", "min_const_generics"] }
+
+nalgebra = "0.31.1"
+
+winit = "0.26"
