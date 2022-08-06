@@ -4,94 +4,85 @@ use crate::{
     game_object::{self, GameObject},
 };
 
-use bytemuck::{Pod, Zeroable};
 use std::sync::{Arc, Mutex};
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
-    command_buffer::{
-        PrimaryAutoCommandBuffer, AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
-    },
-    device::{
-        physical::{PhysicalDevice, PhysicalDeviceType},
-        Device, DeviceCreateInfo, DeviceExtensions, Features, QueueCreateInfo, Queue, 
-    },
-    format::Format,
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, SampleCount},
-    impl_vertex,
-    instance::{Instance, InstanceCreateInfo},
-    pipeline::{
-        graphics::{
-            input_assembly::{InputAssemblyState, PrimitiveTopology, }, 
-            render_pass::PipelineRenderingCreateInfo,
-            rasterization::{RasterizationState, PolygonMode, CullMode, FrontFace},
-            multisample::{MultisampleState},
-            color_blend::{ColorBlendAttachmentState, ColorBlendState},
-            depth_stencil::{DepthStencilState, DepthState, CompareOp},
-            vertex_input::BuffersDefinition,
-            viewport::{Viewport, ViewportState, Scissor},
-        },
-        layout::{PipelineLayoutCreateInfo, PushConstantRange},
-        GraphicsPipeline, PipelineLayout, StateMode, PartialStateMode, Pipeline,
-    },
-    render_pass::{RenderPass, LoadOp, StoreOp, Subpass, Framebuffer, FramebufferCreateInfo},
-    swapchain::{
-        acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError, Surface, self, ColorSpace, PresentMode,
-    },
-    shader::{ShaderStages, },
-    sync::{self, FlushError, GpuFuture},
+    buffer::{BufferUsage, CpuAccessibleBuffer},
 };
-use vulkano_win::VkSurfaceBuild;
 use winit::{
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop, self},
-    window::{Window, WindowBuilder},
-    dpi::LogicalSize
+    event_loop::{ControlFlow, EventLoop},
 };
-use nalgebra::{Matrix2};
 
 fn animate_game_objects(
     game_objects: Arc<Mutex<Vec<game_object::GameObject>>>, 
 ) {
-    let mut i = 1.0;
     for obj in game_objects.lock().unwrap().iter_mut() {
-        obj.transform2d.rotation += 0.001 * std::f32::consts::PI * 2.0 * i;
-        i += 1.0;
+        obj.transform.rotation.y += 0.01 * std::f32::consts::PI * 2.0;
+        obj.transform.rotation.x += 0.005 * std::f32::consts::PI * 2.0;
     }
 }
 
-fn create_game_objects(renderer: &Renderer) -> Vec<game_object::GameObject> {
-    let vertices = vec![
-        Vertex { position: [0.0, -0.5], color: [1.0, 0.0, 0.0] },
-        Vertex { position: [0.5, 0.5], color: [0.0, 1.0, 0.0] },
-        Vertex { position: [-0.5, 0.5], color: [0.0, 0.0, 1.0] },
+fn cube_model(renderer: &Renderer, offset: [f32; 3]) -> Arc<CpuAccessibleBuffer<[Vertex]>> {
+    let mut vertices: Vec<Vertex> = vec![
+        Vertex { position: [-0.5, -0.5, -0.5], color: [0.9, 0.9, 0.9] }, 
+        Vertex { position: [-0.5, 0.5, 0.5], color: [0.9, 0.9, 0.9] }, 
+        Vertex { position: [-0.5, -0.5, 0.5], color: [0.9, 0.9, 0.9] }, 
+        Vertex { position: [-0.5, -0.5, -0.5], color: [0.9, 0.9, 0.9] }, 
+        Vertex { position: [-0.5, 0.5, -0.5], color: [0.9, 0.9, 0.9] }, 
+        Vertex { position: [-0.5, 0.5, 0.5], color: [0.9, 0.9, 0.9] }, 
+        Vertex { position: [0.5, -0.5, -0.5], color: [0.8, 0.8, 0.1] }, 
+        Vertex { position: [0.5, 0.5, 0.5], color: [0.8, 0.8, 0.1] }, 
+        Vertex { position: [0.5, -0.5, 0.5], color: [0.8, 0.8, 0.1] }, 
+        Vertex { position: [0.5, -0.5, -0.5], color: [0.8, 0.8, 0.1] }, 
+        Vertex { position: [0.5, 0.5, -0.5], color: [0.8, 0.8, 0.1] }, 
+        Vertex { position: [0.5, 0.5, 0.5], color: [0.8, 0.8, 0.1] }, 
+        Vertex { position: [-0.5, -0.5, -0.5], color: [0.9, 0.6, 0.1] }, 
+        Vertex { position: [0.5, -0.5, 0.5], color: [0.9, 0.6, 0.1] }, 
+        Vertex { position: [-0.5, -0.5, 0.5], color: [0.9, 0.6, 0.1] }, 
+        Vertex { position: [-0.5, -0.5, -0.5], color: [0.9, 0.6, 0.1] }, 
+        Vertex { position: [0.5, -0.5, -0.5], color: [0.9, 0.6, 0.1] }, 
+        Vertex { position: [0.5, -0.5, 0.5], color: [0.9, 0.6, 0.1] }, 
+        Vertex { position: [-0.5, 0.5, -0.5], color: [0.8, 0.1, 0.1] }, 
+        Vertex { position: [0.5, 0.5, 0.5], color: [0.8, 0.1, 0.1] }, 
+        Vertex { position: [-0.5, 0.5, 0.5], color: [0.8, 0.1, 0.1] }, 
+        Vertex { position: [-0.5, 0.5, -0.5], color: [0.8, 0.1, 0.1] }, 
+        Vertex { position: [0.5, 0.5, -0.5], color: [0.8, 0.1, 0.1] }, 
+        Vertex { position: [0.5, 0.5, 0.5], color: [0.8, 0.1, 0.1] }, 
+        Vertex { position: [-0.5, -0.5, 0.5], color: [0.1, 0.1, 0.8] }, 
+        Vertex { position: [0.5, 0.5, 0.5], color: [0.1, 0.1, 0.8] }, 
+        Vertex { position: [-0.5, 0.5, 0.5], color: [0.1, 0.1, 0.8] }, 
+        Vertex { position: [-0.5, -0.5, 0.5], color: [0.1, 0.1, 0.8] }, 
+        Vertex { position: [0.5, -0.5, 0.5], color: [0.1, 0.1, 0.8] }, 
+        Vertex { position: [0.5, 0.5, 0.5], color: [0.1, 0.1, 0.8] }, 
+        Vertex { position: [-0.5, -0.5, -0.5], color: [0.1, 0.8, 0.1] }, 
+        Vertex { position: [0.5, 0.5, -0.5], color: [0.1, 0.8, 0.1] }, 
+        Vertex { position: [-0.5, 0.5, -0.5], color: [0.1, 0.8, 0.1] }, 
+        Vertex { position: [-0.5, -0.5, -0.5], color: [0.1, 0.8, 0.1] }, 
+        Vertex { position: [0.5, -0.5, -0.5], color: [0.1, 0.8, 0.1] }, 
+        Vertex { position: [0.5, 0.5, -0.5], color: [0.1, 0.8, 0.1] }, 
     ];
+
+    for i in 0..vertices.len() { 
+        vertices[i].position[0] += offset[0];
+        vertices[i].position[1] += offset[1];
+        vertices[i].position[2] += offset[2];
+    };
 
     let vertex_buffer = CpuAccessibleBuffer::from_iter(renderer.device.clone(), BufferUsage::vertex_buffer(), false, vertices)
         .expect("Failed to create vertex buffer");
-    
+
+    vertex_buffer
+}
+
+fn create_game_objects(renderer: &Renderer) -> Vec<game_object::GameObject> {
+    let cube_model = cube_model(renderer, [0.0, 0.0, 0.0]);
+
     let mut game_objects = vec![];
 
-    let mut colors: Vec<[f32; 3]> = vec![
-        [1.0, 0.7, 0.73],
-        [1.0, 0.87, 0.73],
-        [1.0, 1.0, 0.73],
-        [0.73, 1.0, 0.8],
-        [0.73, 0.88, 1.0],
-    ];
-    for i in 0..5 {
-        colors[i] = [colors[i][0].powf(4.0), colors[i][1].powf(4.0), colors[i][2].powf(4.0)];
-    }
-
-    for i in 0..40 {
-        let mut triangle = GameObject::new();
-        triangle.model = Some(vertex_buffer.clone());
-
-        triangle.color = colors[i % colors.len()];
-        triangle.transform2d.translation.x = 0.0;
-        triangle.transform2d.scale = [0.5 + i as f32 * 0.025, 0.5 + i as f32 * 0.025].into();
-        triangle.transform2d.rotation = i as f32 * 0.025 * std::f32::consts::PI;
-        game_objects.push(triangle);
-    };
+    let mut cube = GameObject::new(cube_model);
+    cube.transform.translation = [0.0, 0.0, 0.5].into();
+    cube.transform.scale = [0.5, 0.5, 0.5].into();
+    game_objects.push(cube);
     
     game_objects
 }
@@ -127,14 +118,12 @@ impl FkApp {
                     event: WindowEvent::CloseRequested, 
                     ..
                 } => {
-                    println!("Window closed");
                     *control_flow = ControlFlow::Exit;
                 }
                 Event::WindowEvent { 
                     event: WindowEvent::Resized(_), 
                     ..
                  } => {
-                    println!("Window resized");
                     self.renderer.recreate_swapchain = true;
                  }
                 Event::RedrawEventsCleared => {

@@ -1,12 +1,9 @@
 use crate::{
     simple_render_system::SimpleRenderSystem,
-    app::FkApp,
 };
 
-use bytemuck::{Pod, Zeroable};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
     command_buffer::{
         PrimaryAutoCommandBuffer, AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
     },
@@ -15,34 +12,18 @@ use vulkano::{
         Device, DeviceCreateInfo, DeviceExtensions, Features, QueueCreateInfo, Queue, 
     },
     format::Format,
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, SampleCount},
-    impl_vertex,
+    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
     instance::{Instance, InstanceCreateInfo},
-    pipeline::{
-        graphics::{
-            input_assembly::{InputAssemblyState, PrimitiveTopology, }, 
-            render_pass::PipelineRenderingCreateInfo,
-            rasterization::{RasterizationState, PolygonMode, CullMode, FrontFace},
-            multisample::{MultisampleState},
-            color_blend::{ColorBlendAttachmentState, ColorBlendState},
-            depth_stencil::{DepthStencilState, DepthState, CompareOp},
-            vertex_input::BuffersDefinition,
-            viewport::{Viewport, ViewportState, Scissor},
-        },
-        layout::{PipelineLayoutCreateInfo, PushConstantRange},
-        GraphicsPipeline, PipelineLayout, StateMode, PartialStateMode, Pipeline,
-    },
-    render_pass::{RenderPass, LoadOp, StoreOp, Subpass, Framebuffer, FramebufferCreateInfo},
+    pipeline::graphics::viewport::Viewport,
+    render_pass::{RenderPass, Framebuffer, FramebufferCreateInfo},
     swapchain::{
         acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError, Surface, ColorSpace, PresentMode, SwapchainAcquireFuture,
     },
-    shader::{ShaderStages, },
     sync::{self, FlushError, GpuFuture},
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
-    event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop, self},
+    event_loop::EventLoop,
     window::{Window, WindowBuilder},
     dpi::LogicalSize
 };

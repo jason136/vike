@@ -1,59 +1,47 @@
 use crate::simple_render_system::Vertex;
 
-use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
-    command_buffer::{
-        PrimaryAutoCommandBuffer, AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
-    },
-    device::{
-        physical::{PhysicalDevice, PhysicalDeviceType},
-        Device, DeviceCreateInfo, DeviceExtensions, Features, QueueCreateInfo, Queue, 
-    },
-    format::Format,
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, SampleCount},
-    impl_vertex,
-    instance::{Instance, InstanceCreateInfo},
-    pipeline::{
-        graphics::{
-            input_assembly::{InputAssemblyState, PrimitiveTopology, }, 
-            render_pass::PipelineRenderingCreateInfo,
-            rasterization::{RasterizationState, PolygonMode, CullMode, FrontFace},
-            multisample::{MultisampleState},
-            color_blend::{ColorBlendAttachmentState, ColorBlendState},
-            depth_stencil::{DepthStencilState, DepthState, CompareOp},
-            vertex_input::BuffersDefinition,
-            viewport::{Viewport, ViewportState, Scissor},
-        },
-        layout::{PipelineLayoutCreateInfo, PushConstantRange},
-        GraphicsPipeline, PipelineLayout, StateMode, PartialStateMode, Pipeline,
-    },
-    render_pass::{RenderPass, LoadOp, StoreOp, Subpass, Framebuffer, FramebufferCreateInfo},
-    swapchain::{
-        acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError, Surface, self, ColorSpace, PresentMode,
-    },
-    shader::{ShaderStages, },
-    sync::{self, FlushError, GpuFuture},
-};
+use vulkano::buffer::CpuAccessibleBuffer;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use nalgebra::{Matrix2, Vector2};
+use nalgebra::{Matrix4, Vector3};
 
 #[derive(Clone)]
-pub struct Transform2D {
-    pub translation: Vector2<f32>,
-    pub scale: Vector2<f32>,
-    pub rotation: f32,
+pub struct Transform3D {
+    pub translation: Vector3<f32>,
+    pub scale: Vector3<f32>,
+    pub rotation: Vector3<f32>,
 }
 
-impl Transform2D {
-    pub fn mat2(&self) -> Matrix2<f32> {
-        let s = self.rotation.sin();
-        let c = self.rotation.cos();
+impl Transform3D {
+    pub fn mat4(&self) -> Matrix4<f32> {
+        let c3 = self.rotation.z.cos();
+        let s3 = self.rotation.z.sin();
+        let c2 = self.rotation.x.cos();
+        let s2 = self.rotation.x.sin();
+        let c1 = self.rotation.y.cos();
+        let s1 = self.rotation.y.sin();
 
-        let rotation_mat = Matrix2::new(c, -s, s, c);
-        let scale_mat = Matrix2::new(self.scale.x, 0.0, 0.0, self.scale.y);
+        Matrix4::from_column_slice(&[
+            self.scale.x * (c1 * c3 + s1 * s2 * s3),
+            self.scale.x * (c2 * s3),
+            self.scale.x * (c1 * s2 * s3 - c3 * s1),
+            0.0,
 
-        rotation_mat * scale_mat
+            self.scale.y * (c3 * s1 * s2 - c1 * s3),
+            self.scale.y * (c2 * c3),
+            self.scale.y * (c1 * c3 * s2 + s1 * s3),
+            0.0,
+
+            self.scale.z * (c2 * s1),
+            self.scale.z * (-s2),
+            self.scale.z * (c1 * c2),
+            0.0,
+
+            self.translation.x, 
+            self.translation.y, 
+            self.translation.z, 
+            1.0,
+        ])
     }
 }
 
@@ -62,27 +50,27 @@ static COUNT: AtomicU32 = AtomicU32::new(0);
 #[derive(Clone)]
 pub struct GameObject {
     pub id: u32,
-    pub transform2d: Transform2D,
+    pub transform: Transform3D,
     pub color: [f32; 3],
-    pub model: Option<Arc<CpuAccessibleBuffer<[Vertex]>>>,
+    pub model: Arc<CpuAccessibleBuffer<[Vertex]>>,
 }
 
 impl GameObject {
-    pub fn new() -> GameObject {
+    pub fn new(model: Arc<CpuAccessibleBuffer<[Vertex]>>) -> GameObject {
         let id = COUNT.load(Ordering::SeqCst);
         COUNT.fetch_add(1, Ordering::SeqCst);
 
-        let transform2d = Transform2D {
-            translation: Vector2::new(0.0, 0.0),
-            scale: Vector2::new(1.0, 1.0),
-            rotation: 0.0,
+        let transform = Transform3D {
+            translation: Vector3::new(0.0, 0.0, 0.0),
+            scale: Vector3::new(1.0, 1.0, 1.0),
+            rotation: Vector3::new(0.0, 0.0, 0.0),
         };
 
         GameObject {
             id,
-            transform2d,
+            transform,
             color: [0.0, 0.0, 0.0],
-            model: None,
+            model,
         }
     }
 }

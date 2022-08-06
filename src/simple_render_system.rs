@@ -1,50 +1,31 @@
 use crate::{
     renderer::Renderer,
-    game_object::{self, GameObject}
+    game_object,
 };
 
 use bytemuck::{Pod, Zeroable};
 use std::sync::{Arc, Mutex};
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
+    buffer::TypedBufferAccess,
     command_buffer::{
-        PrimaryAutoCommandBuffer, AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
+        PrimaryAutoCommandBuffer, AutoCommandBufferBuilder
     },
-    device::{
-        physical::{PhysicalDevice, PhysicalDeviceType},
-        Device, DeviceCreateInfo, DeviceExtensions, Features, QueueCreateInfo, Queue, 
-    },
-    format::Format,
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, SampleCount},
+    image::SampleCount,
     impl_vertex,
-    instance::{Instance, InstanceCreateInfo},
     pipeline::{
         graphics::{
-            input_assembly::{InputAssemblyState, PrimitiveTopology, }, 
-            render_pass::PipelineRenderingCreateInfo,
+            input_assembly::{InputAssemblyState, PrimitiveTopology}, 
             rasterization::{RasterizationState, PolygonMode, CullMode, FrontFace},
             multisample::{MultisampleState},
-            color_blend::{ColorBlendAttachmentState, ColorBlendState},
+            color_blend::ColorBlendState,
             depth_stencil::{DepthStencilState, DepthState, CompareOp},
             vertex_input::BuffersDefinition,
-            viewport::{Viewport, ViewportState, Scissor},
+            viewport::ViewportState,
         },
         layout::{PipelineLayoutCreateInfo, PushConstantRange},
         GraphicsPipeline, PipelineLayout, StateMode, PartialStateMode, Pipeline,
     },
-    render_pass::{RenderPass, LoadOp, StoreOp, Subpass, Framebuffer, FramebufferCreateInfo},
-    swapchain::{
-        acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError, Surface, self, ColorSpace, PresentMode,
-    },
-    shader::{ShaderStages, },
-    sync::{self, FlushError, GpuFuture},
-};
-use vulkano_win::VkSurfaceBuild;
-use winit::{
-    event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop, self},
-    window::{Window, WindowBuilder},
-    dpi::LogicalSize
+    shader::ShaderStages, render_pass::Subpass,
 };
 
 mod vs {
@@ -64,7 +45,7 @@ mod fs {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct Vertex {
-    pub position: [f32; 2],
+    pub position: [f32; 3],
     pub color: [f32; 3],
 }
 impl_vertex!(Vertex, position, color);
@@ -164,15 +145,13 @@ impl SimpleRenderSystem {
     ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
         for obj in game_objects.lock().unwrap().iter().rev() {
             let push_constants = vs::ty::PushConstantData {
-                transform: obj.transform2d.mat2().into(),
-                offset: obj.transform2d.translation.into(),
+                transform: obj.transform.mat4().into(),
                 color: obj.color,
-                _dummy0: [0, 0, 0, 0, 0, 0, 0, 0],
             };
             builder
-                .bind_vertex_buffers(0, obj.model.clone().unwrap())
+                .bind_vertex_buffers(0, obj.model.clone())
                 .push_constants(self.pipeline.layout().clone(), 0, push_constants)
-                .draw(obj.model.clone().unwrap().len() as u32, 1, 0, 0).unwrap();
+                .draw(obj.model.clone().len() as u32, 1, 0, 0).unwrap();
         }
 
         builder
