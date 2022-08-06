@@ -1,4 +1,6 @@
 mod app;
+mod renderer;
+mod simple_render_system;
 mod game_object;
 
 fn main() {

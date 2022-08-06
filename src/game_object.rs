@@ -1,4 +1,4 @@
-use crate::app::*;
+use crate::simple_render_system::Vertex;
 
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
