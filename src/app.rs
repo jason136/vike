@@ -6,6 +6,7 @@ use crate::{
 };
 
 use std::sync::{Arc, Mutex};
+use nalgebra::Vector3;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
 };
@@ -106,6 +107,16 @@ impl VkApp {
         let game_objects = Arc::new(Mutex::new(obj_vec));
 
         let camera = Arc::new(Mutex::new(Camera::new()));
+        // camera.lock().unwrap().set_view_direction(
+        //     Vector3::new(0.0, 0.0, 0.0), 
+        //     Vector3::new(0.5, 0.0, 1.0),
+        //     Vector3::new(0.0, -1.0, 0.0),
+        // );
+        camera.lock().unwrap().set_view_target(
+            Vector3::new(-1.0, -2.0, 2.0), 
+            Vector3::new(0.0, 0.0, 2.5),
+            Vector3::new(0.0, -1.0, 0.0),
+        );
 
         Self {
             event_loop,

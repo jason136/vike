@@ -157,11 +157,13 @@ impl SimpleRenderSystem {
         mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, 
         game_objects: Arc<Mutex<Vec<GameObject>>>,
         camera: Arc<Mutex<Camera>>,
-    ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
+    ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {   
         let camera = camera.lock().unwrap();
+        let projection_view = camera.projection_matrix * camera.view_matrix;
+
         for obj in game_objects.lock().unwrap().iter().rev() {
             let push_constants = vs::ty::PushConstantData {
-                transform: (camera.projection_matrix * obj.transform.mat4()).into(),
+                transform: (projection_view * obj.transform.mat4()).into(),
                 color: obj.color,
             };
             builder
