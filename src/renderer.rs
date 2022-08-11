@@ -14,7 +14,6 @@ use vulkano::{
     format::Format,
     image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, AttachmentImage},
     instance::{Instance, InstanceCreateInfo},
-    pipeline::graphics::viewport::Viewport,
     render_pass::{RenderPass, Framebuffer, FramebufferCreateInfo},
     swapchain::{
         acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError, Surface, ColorSpace, PresentMode, SwapchainAcquireFuture,
@@ -70,7 +69,14 @@ impl Renderer {
 
     pub fn create_window() -> (EventLoop<()>, Arc<Surface<Window>>, Arc<Instance>) {
         let instance = Renderer::create_instance();
-        let (event_loop, surface) = Renderer::create_winit(instance.clone(), "Release", 800, 600);
+        let event_loop = EventLoop::new();
+
+        let surface = WindowBuilder::new()
+            .with_title("Release")
+            .with_inner_size(LogicalSize::new(800 as f64, 600 as f64))
+            .with_resizable(true)
+            .build_vk_surface(&event_loop, instance.clone())
+            .expect("Failed to create surface");
 
         (event_loop, surface, instance)
     }
@@ -176,18 +182,10 @@ impl Renderer {
             enumerate_portability: true,
             ..Default::default()
         }).expect("Failed to create instance");
+        println!("API Version: {:#?}", instance.api_version());
+        println!("Extensions: {:#?}", instance.enabled_extensions());
+        println!("Layers: {:#?}", instance.enabled_layers());
         instance
-    }
-
-    fn create_winit(instance: Arc<Instance>, title: &str, width: u32, height: u32) -> (EventLoop<()>, Arc<Surface<Window>>) {
-        let event_loop = EventLoop::new();
-        let surface = WindowBuilder::new()
-            .with_title(title)
-            .with_inner_size(LogicalSize::new(width as f64, height as f64))
-            .with_resizable(true)
-            .build_vk_surface(&event_loop, instance.clone())
-            .expect("Failed to create surface");
-        (event_loop, surface)
     }
 
     fn create_device(instance: Arc<Instance>, surface: Arc<Surface<Window>>) -> (Arc<Device>, Arc<Queue>) {
@@ -234,6 +232,7 @@ impl Renderer {
             },
         ).expect("Failed to create logical device");
         let queue = queues.next().unwrap();
+
         (device, queue)
     }
 
@@ -254,7 +253,7 @@ impl Renderer {
             if !available_image_formats.contains(&image_format) {
                 image_format = available_image_formats[0];
             }
-            image_format = available_image_formats[0];
+            println!("Image Formats: {:?}", available_image_formats);
 
             Swapchain::new(
                 device.clone(), 
@@ -298,6 +297,7 @@ impl Renderer {
                 depth_stencil: {depth}
             }
         ).unwrap();
+
         render_pass
     }
 

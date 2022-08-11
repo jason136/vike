@@ -1,7 +1,8 @@
 use crate::{
     simple_render_system::{SimpleRenderSystem, Vertex},
     renderer::Renderer,
-    game_object::{self, GameObject},
+    game_object::GameObject,
+    camera::Camera,
 };
 
 use std::sync::{Arc, Mutex};
@@ -12,15 +13,6 @@ use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
 };
-
-fn animate_game_objects(
-    game_objects: Arc<Mutex<Vec<game_object::GameObject>>>, 
-) {
-    for obj in game_objects.lock().unwrap().iter_mut() {
-        obj.transform.rotation.y += 0.01 * std::f32::consts::PI * 2.0;
-        obj.transform.rotation.x += 0.005 * std::f32::consts::PI * 2.0;
-    }
-}
 
 fn cube_model(renderer: &Renderer, offset: [f32; 3]) -> Arc<CpuAccessibleBuffer<[Vertex]>> {
     let mut vertices: Vec<Vertex> = vec![
@@ -74,27 +66,37 @@ fn cube_model(renderer: &Renderer, offset: [f32; 3]) -> Arc<CpuAccessibleBuffer<
     vertex_buffer
 }
 
-fn create_game_objects(renderer: &Renderer) -> Vec<game_object::GameObject> {
+fn create_game_objects(renderer: &Renderer) -> Vec<GameObject> {
     let cube_model = cube_model(renderer, [0.0, 0.0, 0.0]);
 
     let mut game_objects = vec![];
 
     let mut cube = GameObject::new(cube_model);
-    cube.transform.translation = [0.0, 0.0, 0.5].into();
+    cube.transform.translation = [0.0, 0.0, 2.5].into();
     cube.transform.scale = [0.5, 0.5, 0.5].into();
     game_objects.push(cube);
     
     game_objects
 }
 
-pub struct FkApp {
+fn animate_game_objects(
+    game_objects: Arc<Mutex<Vec<GameObject>>>, 
+) {
+    for obj in game_objects.lock().unwrap().iter_mut() {
+        obj.transform.rotation.y += 0.01 * std::f32::consts::PI * 2.0;
+        obj.transform.rotation.x += 0.005 * std::f32::consts::PI * 2.0;
+    }
+}
+
+pub struct VkApp {
     pub event_loop: EventLoop<()>,
     pub renderer: Renderer,
     pub simple_render_system: SimpleRenderSystem,
-    pub game_objects: Arc<Mutex<Vec<game_object::GameObject>>>,
+    pub game_objects: Arc<Mutex<Vec<GameObject>>>,
+    pub camera: Arc<Mutex<Camera>>,
 }
 
-impl FkApp {
+impl VkApp {
     pub fn new() -> Self {
         let (event_loop, surface, instance) = Renderer::create_window();
         let renderer = Renderer::new(instance, surface);
@@ -103,11 +105,14 @@ impl FkApp {
         let obj_vec = create_game_objects(&renderer);
         let game_objects = Arc::new(Mutex::new(obj_vec));
 
+        let camera = Arc::new(Mutex::new(Camera::new()));
+
         Self {
             event_loop,
             renderer, 
             simple_render_system,
             game_objects,
+            camera,
         }
     }
 
@@ -137,8 +142,17 @@ impl FkApp {
                             self.simple_render_system.pipeline = SimpleRenderSystem::create_pipeline(&self.renderer);
                         }
 
+                        let dimensions = self.renderer.surface.window().inner_size();
+                        let aspect = dimensions.width as f32 / dimensions.height as f32;
+                        self.camera.lock().unwrap().set_orthographic_projection(-aspect, aspect, -1.0, 1.0, -1.0, 1.0);
+                        self.camera.lock().unwrap().set_perspective_projection(50.0_f32.to_radians(), aspect, 0.1, 10.0);
+
                         animate_game_objects(self.game_objects.clone());
-                        builder = self.simple_render_system.render_game_objects(builder, self.game_objects.clone());
+                        builder = self.simple_render_system.render_game_objects(
+                            builder, 
+                            self.game_objects.clone(),
+                            self.camera.clone(),
+                        );
 
                         self.renderer.end_frame(builder, acquire_future);
                     }

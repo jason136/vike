@@ -1,6 +1,7 @@
 use crate::{
     renderer::Renderer,
-    game_object,
+    game_object::GameObject,
+    camera::Camera,
 };
 
 use bytemuck::{Pod, Zeroable};
@@ -154,11 +155,13 @@ impl SimpleRenderSystem {
     pub fn render_game_objects(
         &self,
         mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, 
-        game_objects: Arc<Mutex<Vec<game_object::GameObject>>>, 
+        game_objects: Arc<Mutex<Vec<GameObject>>>,
+        camera: Arc<Mutex<Camera>>,
     ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
+        let camera = camera.lock().unwrap();
         for obj in game_objects.lock().unwrap().iter().rev() {
             let push_constants = vs::ty::PushConstantData {
-                transform: obj.transform.mat4().into(),
+                transform: (camera.projection_matrix * obj.transform.mat4()).into(),
                 color: obj.color,
             };
             builder

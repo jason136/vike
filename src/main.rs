@@ -2,8 +2,9 @@ mod app;
 mod renderer;
 mod simple_render_system;
 mod game_object;
+mod camera;
 
 fn main() {
-    let app = app::FkApp::new();
+    let app = app::VkApp::new();
     app.main_loop();
 }
