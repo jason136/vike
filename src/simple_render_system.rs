@@ -20,7 +20,7 @@ use vulkano::{
             color_blend::ColorBlendState,
             depth_stencil::{DepthStencilState, DepthState, CompareOp},
             vertex_input::BuffersDefinition,
-            viewport::ViewportState,
+            viewport::{ViewportState, Viewport},
         },
         layout::{PipelineLayoutCreateInfo, PushConstantRange},
         GraphicsPipeline, PipelineLayout, StateMode, PartialStateMode, Pipeline,
@@ -72,6 +72,24 @@ impl SimpleRenderSystem {
             ..Default::default()
         };
 
+        let dimensions = renderer.surface.window().inner_size();
+        let viewport_state = ViewportState::viewport_fixed_scissor_irrelevant([
+            Viewport {
+                origin: [0.0, 0.0],
+                dimensions: [dimensions.width as f32, dimensions.height as f32],
+                depth_range: 0.0..1.0,
+            },
+        ]);
+
+        let depth_stencil_state = DepthStencilState {
+            depth: Some(DepthState{
+                enable_dynamic: false, 
+                write_enable: StateMode::Fixed(true),
+                compare_op: StateMode::Fixed(CompareOp::Less),
+            }),
+            ..Default::default()
+        };
+
         let rasterization_state = RasterizationState{ 
             depth_clamp_enable: false,
             rasterizer_discard_enable: StateMode::Fixed(false),
@@ -94,15 +112,6 @@ impl SimpleRenderSystem {
             ..Default::default()
         };
 
-        let depth_stencil_state = DepthStencilState {
-            depth: Some(DepthState{
-                enable_dynamic: true, 
-                write_enable: StateMode::Fixed(true),
-                compare_op: StateMode::Fixed(CompareOp::Less),
-            }),
-            ..Default::default()
-        };
-
         let push_constant_range = PushConstantRange {
             stages: ShaderStages {
                 vertex: true, 
@@ -122,18 +131,22 @@ impl SimpleRenderSystem {
         ).expect("Failed to create pipeline layout");
 
         let pipeline = GraphicsPipeline::start()
-            .render_pass(Subpass::from(renderer.render_pass.clone(), 0).unwrap())
-            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
-            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .input_assembly_state(input_assembly_state)
-            .rasterization_state(rasterization_state)
-            .multisample_state(multisample_state)
-            .color_blend_state(color_blend_state)
-            .depth_stencil_state(depth_stencil_state)
-            .vertex_shader(vs.entry_point("main").expect("Failed to set vertex shader"), ())
-            .fragment_shader(fs.entry_point("main").expect("Failed to set fragment shader"), ())
-            .with_pipeline_layout(renderer.device.clone(), pipeline_layout.clone())
-            .expect("Failed to create graphics pipeline");
+        .vertex_input_state(
+            BuffersDefinition::new()
+                .vertex::<Vertex>()
+        )
+        .vertex_shader(vs.entry_point("main").expect("Failed to set vertex shader"), ())
+        .input_assembly_state(input_assembly_state)
+        .viewport_state(viewport_state)
+        .fragment_shader(fs.entry_point("main").expect("Failed to set fragment shader"), ())
+        .depth_stencil_state(depth_stencil_state)
+        .render_pass(Subpass::from(renderer.render_pass.clone(), 0).unwrap())
+        
+        .rasterization_state(rasterization_state)
+        .multisample_state(multisample_state)
+        .color_blend_state(color_blend_state)
+        .with_pipeline_layout(renderer.device.clone(), pipeline_layout.clone())
+        .expect("Failed to create graphics pipeline");
         
         pipeline
     }

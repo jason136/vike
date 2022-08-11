@@ -128,7 +128,14 @@ impl FkApp {
                  }
                 Event::RedrawEventsCleared => {
                     
-                    if let Some((mut builder, acquire_future)) = self.renderer.begin_frame(&self.simple_render_system) {
+                    if let Some((
+                        mut builder, 
+                        acquire_future, 
+                        rebuild_pipeline
+                    )) = self.renderer.begin_frame(&self.simple_render_system) {
+                        if rebuild_pipeline {
+                            self.simple_render_system.pipeline = SimpleRenderSystem::create_pipeline(&self.renderer);
+                        }
 
                         animate_game_objects(self.game_objects.clone());
                         builder = self.simple_render_system.render_game_objects(builder, self.game_objects.clone());

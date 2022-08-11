@@ -12,7 +12,7 @@ use vulkano::{
         Device, DeviceCreateInfo, DeviceExtensions, Features, QueueCreateInfo, Queue, 
     },
     format::Format,
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
+    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage, AttachmentImage},
     instance::{Instance, InstanceCreateInfo},
     pipeline::graphics::viewport::Viewport,
     render_pass::{RenderPass, Framebuffer, FramebufferCreateInfo},
@@ -33,7 +33,6 @@ pub struct Renderer {
     pub surface: Arc<Surface<Window>>,
     pub queue: Arc<Queue>,
     pub swapchain: Arc<Swapchain<Window>>,
-    pub viewport: Viewport,
     pub framebuffers: Vec<Arc<Framebuffer>>,
     pub render_pass: Arc<RenderPass>,
     pub recreate_swapchain: bool,
@@ -47,13 +46,11 @@ impl Renderer {
         let (swapchain, images) = Renderer::create_swapchain(surface.clone(), device.clone());
         let render_pass = Renderer::create_render_pass(device.clone(), swapchain.clone());
 
-        let mut viewport = Viewport {
-            origin: [0.0, 0.0],
-            dimensions: [0.0, 0.0],
-            depth_range: 0.0..1.0,
-        };
-
-        let framebuffers = Renderer::create_framebuffers(&images, render_pass.clone(), &mut viewport);
+        let framebuffers = Renderer::create_framebuffers(
+            device.clone(),
+            &images,
+            render_pass.clone(),
+        );
 
         let recreate_swapchain = false;
         let previous_frame_end = Some(sync::now(device.clone()).boxed());
@@ -63,7 +60,6 @@ impl Renderer {
             surface,
             queue,
             swapchain,
-            viewport,
             framebuffers,
             render_pass,
             recreate_swapchain,
@@ -80,7 +76,7 @@ impl Renderer {
     }
 
     pub fn begin_frame(&mut self, simple_render_system: &SimpleRenderSystem
-    ) -> Option<(AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, SwapchainAcquireFuture<Window>)> {
+    ) -> Option<(AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, SwapchainAcquireFuture<Window>, bool)> {
         let dimensions = self.surface.window().inner_size();
         if dimensions.width == 0 || dimensions.height == 0 {
             return None
@@ -101,11 +97,10 @@ impl Renderer {
 
             self.swapchain = new_swapchain;
             self.framebuffers = Renderer::create_framebuffers(
+                self.device.clone(),
                 &new_images,
                 self.render_pass.clone(),
-                &mut self.viewport,
             );
-            self.recreate_swapchain = false;
         }
 
         let (image_num, suboptimal, acquire_future) =
@@ -133,18 +128,22 @@ impl Renderer {
                 RenderPassBeginInfo {
                     render_area_offset: [0, 0],
                     render_area_extent: self.swapchain.image_extent(),
-                    clear_values: vec![Some([0.01, 0.01, 0.01, 1.0].into())],
+                    clear_values: vec![
+                        Some([0.01, 0.01, 0.01, 1.0].into()),
+                        Some(1f32.into()),
+                    ],
                     ..RenderPassBeginInfo::framebuffer(self.framebuffers[self.image_index].clone())
                 },
                 SubpassContents::Inline,
             ).unwrap()
-            .set_viewport(0, [self.viewport.clone()])
             .bind_pipeline_graphics(simple_render_system.pipeline.clone());
             
-        Some((builder, acquire_future))
+        Some((builder, acquire_future, self.recreate_swapchain))
     }
 
     pub fn end_frame(&mut self, mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, acquire_future: SwapchainAcquireFuture<Window>) {
+        self.recreate_swapchain = false;
+
         builder.end_render_pass().unwrap();
         let command_buffer = builder.build().unwrap();
 
@@ -286,23 +285,32 @@ impl Renderer {
                     store: Store,
                     format: swapchain.image_format(),
                     samples: 1,
+                },
+                depth: {
+                    load: Clear,
+                    store: DontCare,
+                    format: Format::D16_UNORM,
+                    samples: 1,
                 }
             },
             pass: {
                 color: [color],
-                depth_stencil: {}
+                depth_stencil: {depth}
             }
         ).unwrap();
         render_pass
     }
 
     fn create_framebuffers(
+        device: Arc<Device>,
         images: &[Arc<SwapchainImage<Window>>],
         render_pass: Arc<RenderPass>,
-        viewport: &mut Viewport,
     ) -> Vec<Arc<Framebuffer>> {
         let dimensions = images[0].dimensions().width_height();
-        viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
+
+        let depth_buffer = ImageView::new_default(
+            AttachmentImage::transient(device.clone(), dimensions, Format::D16_UNORM).unwrap(),
+        ).unwrap();
     
         images
             .iter().map(|image| {
@@ -310,12 +318,10 @@ impl Renderer {
                 Framebuffer::new(
                     render_pass.clone(),
                     FramebufferCreateInfo {
-                        attachments: vec![view],
+                        attachments: vec![view, depth_buffer.clone()],
                         ..Default::default()
                     },
-                )
-                .unwrap()
-            })
-            .collect::<Vec<_>>()
+                ).unwrap()
+            }).collect::<Vec<_>>()
     }
 }
