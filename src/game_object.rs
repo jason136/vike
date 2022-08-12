@@ -52,11 +52,11 @@ pub struct GameObject {
     pub id: u32,
     pub transform: Transform3D,
     pub color: [f32; 3],
-    pub model: Arc<CpuAccessibleBuffer<[Vertex]>>,
+    pub model: Option<Arc<CpuAccessibleBuffer<[Vertex]>>>,
 }
 
 impl GameObject {
-    pub fn new(model: Arc<CpuAccessibleBuffer<[Vertex]>>) -> GameObject {
+    pub fn new(model: Option<Arc<CpuAccessibleBuffer<[Vertex]>>>) -> GameObject {
         let id = COUNT.load(Ordering::SeqCst);
         COUNT.fetch_add(1, Ordering::SeqCst);
 

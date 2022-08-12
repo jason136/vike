@@ -1,13 +1,16 @@
+use crate::game_object::GameObject;
 use nalgebra::{Matrix4, Vector3};
 
 pub struct Camera {
+    pub object: Option<GameObject>,
     pub projection_matrix: Matrix4<f32>,
     pub view_matrix: Matrix4<f32>,
 }
 
 impl Camera {
-    pub fn new() -> Self {
+    pub fn new(object: Option<GameObject>) -> Self {
         Camera {
+            object,
             projection_matrix: Matrix4::identity(),
             view_matrix: Matrix4::identity(),
         }
@@ -63,6 +66,14 @@ impl Camera {
 
     pub fn set_view_target(&mut self, position: Vector3<f32>, target: Vector3<f32>, up: Vector3<f32>) {
         Camera::set_view_direction(self, position, target - position, up);
+    }
+
+    pub fn match_obj_transform(&mut self) {
+        if self.object.is_none() { return; }
+        self.set_view_xyz(
+            self.object.as_ref().unwrap().transform.translation, 
+            self.object.as_ref().unwrap().transform.rotation,
+        );
     }
 
     pub fn set_view_xyz(&mut self, position: Vector3<f32>, rotation: Vector3<f32>) {

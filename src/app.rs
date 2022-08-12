@@ -3,15 +3,15 @@ use crate::{
     renderer::Renderer,
     game_object::GameObject,
     camera::Camera,
+    movement::KeyboardController,
 };
 
-use std::sync::{Arc, Mutex};
-use nalgebra::Vector3;
+use std::{sync::{Arc, Mutex}, time::Instant};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
 };
 use winit::{
-    event::{Event, WindowEvent},
+    event::{Event, WindowEvent, ElementState, VirtualKeyCode},
     event_loop::{ControlFlow, EventLoop},
 };
 
@@ -72,7 +72,7 @@ fn create_game_objects(renderer: &Renderer) -> Vec<GameObject> {
 
     let mut game_objects = vec![];
 
-    let mut cube = GameObject::new(cube_model);
+    let mut cube = GameObject::new(Some(cube_model));
     cube.transform.translation = [0.0, 0.0, 2.5].into();
     cube.transform.scale = [0.5, 0.5, 0.5].into();
     game_objects.push(cube);
@@ -80,12 +80,10 @@ fn create_game_objects(renderer: &Renderer) -> Vec<GameObject> {
     game_objects
 }
 
-fn animate_game_objects(
-    game_objects: Arc<Mutex<Vec<GameObject>>>, 
-) {
+fn animate_game_objects(game_objects: Arc<Mutex<Vec<GameObject>>>, dt: f32) {
     for obj in game_objects.lock().unwrap().iter_mut() {
-        obj.transform.rotation.y += 0.01 * std::f32::consts::PI * 2.0;
-        obj.transform.rotation.x += 0.005 * std::f32::consts::PI * 2.0;
+        obj.transform.rotation.y += 1.0 * dt * std::f32::consts::PI * 2.0;
+        obj.transform.rotation.x += 0.5 * dt * std::f32::consts::PI * 2.0;
     }
 }
 
@@ -106,17 +104,7 @@ impl VkApp {
         let obj_vec = create_game_objects(&renderer);
         let game_objects = Arc::new(Mutex::new(obj_vec));
 
-        let camera = Arc::new(Mutex::new(Camera::new()));
-        // camera.lock().unwrap().set_view_direction(
-        //     Vector3::new(0.0, 0.0, 0.0), 
-        //     Vector3::new(0.5, 0.0, 1.0),
-        //     Vector3::new(0.0, -1.0, 0.0),
-        // );
-        camera.lock().unwrap().set_view_target(
-            Vector3::new(-1.0, -2.0, 2.0), 
-            Vector3::new(0.0, 0.0, 2.5),
-            Vector3::new(0.0, -1.0, 0.0),
-        );
+        let camera = Arc::new(Mutex::new(Camera::new(Some(GameObject::new(None)))));
 
         Self {
             event_loop,
@@ -128,21 +116,15 @@ impl VkApp {
     }
 
     pub fn main_loop(mut self) {
+        let mut current_time = Instant::now();
+
+        let mut camera_controller = KeyboardController::new();
+
         self.event_loop.run(move |event, _, control_flow| {
             match event {
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested, 
-                    ..
-                } => {
-                    *control_flow = ControlFlow::Exit;
-                }
-                Event::WindowEvent { 
-                    event: WindowEvent::Resized(_), 
-                    ..
-                 } => {
-                    self.renderer.recreate_swapchain = true;
-                 }
-                Event::RedrawEventsCleared => {
+                Event::MainEventsCleared => {
+                    let delta_time = current_time.elapsed().as_secs_f32();
+                    current_time = Instant::now();
                     
                     if let Some((
                         mut builder, 
@@ -153,12 +135,14 @@ impl VkApp {
                             self.simple_render_system.pipeline = SimpleRenderSystem::create_pipeline(&self.renderer);
                         }
 
+                        camera_controller.move_xz(delta_time, &mut self.camera.lock().unwrap().object.as_mut().unwrap());
+                        self.camera.lock().unwrap().match_obj_transform();
+
                         let dimensions = self.renderer.surface.window().inner_size();
                         let aspect = dimensions.width as f32 / dimensions.height as f32;
-                        self.camera.lock().unwrap().set_orthographic_projection(-aspect, aspect, -1.0, 1.0, -1.0, 1.0);
                         self.camera.lock().unwrap().set_perspective_projection(50.0_f32.to_radians(), aspect, 0.1, 10.0);
 
-                        animate_game_objects(self.game_objects.clone());
+                        animate_game_objects(self.game_objects.clone(), delta_time);
                         builder = self.simple_render_system.render_game_objects(
                             builder, 
                             self.game_objects.clone(),
@@ -167,7 +151,36 @@ impl VkApp {
 
                         self.renderer.end_frame(builder, acquire_future);
                     }
-                }
+                },
+                Event::WindowEvent {
+                    event: WindowEvent::KeyboardInput { input, .. }, ..
+                } => {
+                    if input.virtual_keycode.is_none() { return };
+                    match input.virtual_keycode.unwrap() {
+                        VirtualKeyCode::A => camera_controller.move_left = input.state == ElementState::Pressed,
+                        VirtualKeyCode::D => camera_controller.move_right = input.state == ElementState::Pressed,
+                        VirtualKeyCode::W => camera_controller.move_forward = input.state == ElementState::Pressed,
+                        VirtualKeyCode::S => camera_controller.move_backward = input.state == ElementState::Pressed,
+                        VirtualKeyCode::Space => camera_controller.move_up = input.state == ElementState::Pressed,
+                        VirtualKeyCode::LShift => camera_controller.move_down = input.state == ElementState::Pressed,
+
+                        VirtualKeyCode::Left => camera_controller.look_left = input.state == ElementState::Pressed,
+                        VirtualKeyCode::Right => camera_controller.look_right = input.state == ElementState::Pressed,
+                        VirtualKeyCode::Up => camera_controller.look_up = input.state == ElementState::Pressed,
+                        VirtualKeyCode::Down => camera_controller.look_down = input.state == ElementState::Pressed,
+                        _ => {},
+                    };
+                },
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested, ..
+                } => {
+                    *control_flow = ControlFlow::Exit;
+                },
+                Event::WindowEvent { 
+                    event: WindowEvent::Resized(_), ..
+                 } => {
+                    self.renderer.recreate_swapchain = true;
+                 },
                 _ => (),
             }
         });

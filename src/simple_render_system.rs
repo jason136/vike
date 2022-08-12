@@ -167,9 +167,9 @@ impl SimpleRenderSystem {
                 color: obj.color,
             };
             builder
-                .bind_vertex_buffers(0, obj.model.clone())
+                .bind_vertex_buffers(0, obj.model.clone().unwrap())
                 .push_constants(self.pipeline.layout().clone(), 0, push_constants)
-                .draw(obj.model.clone().len() as u32, 1, 0, 0).unwrap();
+                .draw(obj.model.clone().unwrap().len() as u32, 1, 0, 0).unwrap();
         }
 
         builder
