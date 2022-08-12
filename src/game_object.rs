@@ -1,6 +1,10 @@
+use crate::renderer::Renderer;
 use crate::simple_render_system::Vertex;
 
-use vulkano::buffer::CpuAccessibleBuffer;
+use vulkano::DeviceSize;
+use vulkano::buffer::{CpuAccessibleBuffer, BufferUsage, DeviceLocalBuffer, BufferContents};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBuffer};
+use vulkano::sync::GpuFuture;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use nalgebra::{Matrix4, Vector3};
@@ -52,11 +56,11 @@ pub struct GameObject {
     pub id: u32,
     pub transform: Transform3D,
     pub color: [f32; 3],
-    pub model: Option<Arc<CpuAccessibleBuffer<[Vertex]>>>,
+    pub model: Option<Arc<Model>>,
 }
 
 impl GameObject {
-    pub fn new(model: Option<Arc<CpuAccessibleBuffer<[Vertex]>>>) -> GameObject {
+    pub fn new(model: Option<Arc<Model>>) -> GameObject {
         let id = COUNT.load(Ordering::SeqCst);
         COUNT.fetch_add(1, Ordering::SeqCst);
 
@@ -72,5 +76,77 @@ impl GameObject {
             color: [0.0, 0.0, 0.0],
             model,
         }
+    }
+}
+
+pub struct Model {
+    pub vertex_buffer: Arc<DeviceLocalBuffer<[Vertex]>>,
+    pub normals_buffer: Option<Arc<DeviceLocalBuffer<[Vertex]>>>,
+    pub index_buffer: Option<Arc<DeviceLocalBuffer<[u32]>>>,
+}
+
+impl Model {
+    pub fn new(renderer: &Renderer, vertices: Vec<Vertex>, indices: Option<Vec<u32>>, normals: Option<Vec<Vertex>>) -> Self {
+
+        let vertex_buffer = Model::create_device_local_buffer(renderer, vertices, BufferUsage::vertex_buffer());
+
+        let normals_buffer = if normals.is_some() { Some( 
+            Model::create_device_local_buffer(renderer, normals.unwrap(), BufferUsage::all())
+        )} else {
+            None
+        };
+        let index_buffer = if indices.is_some() { Some( 
+            Model::create_device_local_buffer(renderer, indices.unwrap(), BufferUsage::index_buffer())
+        )} else {
+            None
+        };
+
+        Self {
+            vertex_buffer,
+            normals_buffer,
+            index_buffer,
+        }
+    }
+
+    fn create_device_local_buffer<T>(
+        renderer: &Renderer, 
+        data: Vec<T>, 
+        usage: BufferUsage, 
+    ) -> Arc<DeviceLocalBuffer<[T]>>
+    where 
+        [T]: BufferContents
+    {
+        let buffer_length = data.len() as u64;
+        let staging_buffer = 
+            CpuAccessibleBuffer::from_iter(
+                renderer.device.clone(), 
+                BufferUsage::transfer_src(), 
+                false, 
+                data
+            ).expect("Failed to create vertex staging buffer");
+        let device_local_buffer = DeviceLocalBuffer::<[T]>::array(
+            renderer.device.clone(), 
+            buffer_length as DeviceSize,
+            usage | BufferUsage::transfer_dst(),
+            renderer.device.active_queue_families(),
+        ).expect("Failed to allocate vertex buffer");
+
+        let mut cbb = AutoCommandBufferBuilder::primary(
+            renderer.device.clone(),
+            renderer.queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        ).expect("Failed to create command buffer builder");
+
+        cbb.copy_buffer(CopyBufferInfo::buffers(
+            staging_buffer,
+            device_local_buffer.clone(),
+        )).expect("Failed to copy vertex buffer");
+        let cb = cbb.build().expect("Failed to build command buffer");
+
+        cb.execute(renderer.queue.clone()).unwrap()
+            .then_signal_fence_and_flush().unwrap()
+            .wait(None).unwrap();
+
+        device_local_buffer
     }
 }

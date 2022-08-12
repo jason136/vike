@@ -166,10 +166,26 @@ impl SimpleRenderSystem {
                 transform: (projection_view * obj.transform.mat4()).into(),
                 color: obj.color,
             };
-            builder
-                .bind_vertex_buffers(0, obj.model.clone().unwrap())
-                .push_constants(self.pipeline.layout().clone(), 0, push_constants)
-                .draw(obj.model.clone().unwrap().len() as u32, 1, 0, 0).unwrap();
+            builder.push_constants(self.pipeline.layout().clone(), 0, push_constants);
+
+            let model = obj.model.clone().unwrap();
+
+            if model.normals_buffer.is_none() {
+                builder.bind_vertex_buffers(0, model.vertex_buffer.clone());
+            }
+            else {
+                builder.bind_vertex_buffers(0, (
+                    model.vertex_buffer.clone(), 
+                    model.normals_buffer.clone().unwrap(),
+                ));
+            }
+            if model.index_buffer.is_none() {
+                builder.draw(model.vertex_buffer.len() as u32, 1, 0, 0).unwrap();
+            }
+            else {
+                builder.bind_index_buffer(model.index_buffer.clone().unwrap())
+                .draw_indexed(model.index_buffer.clone().unwrap().len() as u32, 1, 0, 0, 0).unwrap();
+            }
         }
 
         builder

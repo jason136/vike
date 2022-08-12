@@ -266,7 +266,7 @@ impl Renderer {
                     image_usage: ImageUsage::color_attachment(), 
                     composite_alpha: surface_capabilities
                         .supported_composite_alpha.iter().next().unwrap(),
-                    present_mode: PresentMode::Fifo,
+                    present_mode: PresentMode::Immediate,
                     ..Default::default()
                 }
             ).expect("Failed to create swapchain")
