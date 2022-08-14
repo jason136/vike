@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use nalgebra::{Matrix4, Vector3};
+use nalgebra::{Matrix4, Vector3, Matrix3};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
@@ -75,9 +75,38 @@ impl Transform3D {
             1.0,
         ])
     }
+
+    pub fn normal_matrix(&self) -> Matrix4<f32> {
+        let c3 = self.rotation.z.cos();
+        let s3 = self.rotation.z.sin();
+        let c2 = self.rotation.x.cos();
+        let s2 = self.rotation.x.sin();
+        let c1 = self.rotation.y.cos();
+        let s1 = self.rotation.y.sin();
+        let inv_scale = Vector3::new(1.0 / self.scale.x, 1.0 / self.scale.y, 1.0 / self.scale.z);
+
+        Matrix4::from_column_slice(&[
+            inv_scale.x * (c1 * c3 + s1 * s2 * s3),
+            inv_scale.x * (c2 * s3),
+            inv_scale.x * (c1 * s2 * s3 - c3 * s1),
+            0.0, 
+
+            inv_scale.y * (c3 * s1 * s2 - c1 * s3),
+            inv_scale.y * (c2 * c3),
+            inv_scale.y * (c1 * c3 * s2 + s1 * s3),
+            0.0, 
+
+            inv_scale.z * (c2 * s1),
+            inv_scale.z * (-s2),
+            inv_scale.z * (c1 * c2),
+            0.0, 
+
+            0.0, 0.0, 0.0, 0.0,
+        ])
+    }
 }
 
-static COUNT: AtomicU32 = AtomicU32::new(0);
+static GAME_OBJECT_COUNT: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone)]
 pub struct GameObject {
@@ -89,8 +118,8 @@ pub struct GameObject {
 
 impl GameObject {
     pub fn new(model: Option<Arc<Model>>) -> GameObject {
-        let id = COUNT.load(Ordering::SeqCst);
-        COUNT.fetch_add(1, Ordering::SeqCst);
+        let id = GAME_OBJECT_COUNT.load(Ordering::SeqCst);
+        GAME_OBJECT_COUNT.fetch_add(1, Ordering::SeqCst);
 
         let transform = Transform3D {
             translation: Vector3::new(0.0, 0.0, 0.0),

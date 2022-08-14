@@ -152,9 +152,10 @@ impl SimpleRenderSystem {
         let projection_view = camera.projection_matrix * camera.view_matrix;
 
         for obj in game_objects.lock().unwrap().iter().rev() {
+            let model_matrix = obj.transform.mat4();
             let push_constants = vs::ty::PushConstantData {
-                transform: (projection_view * obj.transform.mat4()).into(),
-                color: obj.color,
+                transform: (projection_view * model_matrix).into(),
+                normalMatrix: obj.transform.normal_matrix().into(),
             };
 
             let model = obj.model.clone().unwrap();

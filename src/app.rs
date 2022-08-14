@@ -14,12 +14,12 @@ use winit::{
 use std::io::Write;
 
 fn create_game_objects(renderer: &Renderer) -> Vec<GameObject> {
-    let cube_model = Arc::new(Model::load_obj(renderer, "models/smooth_vase.obj"));
+    let cube_model = Arc::new(Model::load_obj(renderer, "models/flat_vase.obj"));
 
     let mut game_objects = vec![];
 
     let mut game_object = GameObject::new(Some(cube_model));
-    game_object.transform.translation = [0.0, 0.0, 2.5].into();
+    game_object.transform.translation = [0.0, 0.5, 2.5].into();
     game_object.transform.scale = [3.0; 3].into();
     game_objects.push(game_object);
     
