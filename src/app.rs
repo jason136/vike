@@ -1,5 +1,5 @@
 use crate::{
-    simple_render_system::{SimpleRenderSystem, Vertex},
+    simple_render_system::{SimpleRenderSystem},
     renderer::Renderer,
     game_object::{GameObject, Model},
     camera::Camera,
@@ -7,75 +7,30 @@ use crate::{
 };
 
 use std::{sync::{Arc, Mutex}, time::Instant};
-use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool},
-};
 use winit::{
     event::{Event, WindowEvent, ElementState, VirtualKeyCode},
     event_loop::{ControlFlow, EventLoop},
 };
-
 use std::io::Write;
-fn cube_model(renderer: &Renderer, offset: [f32; 3]) -> Arc<Model> {
-    let mut vertices: Vec<Vertex> = vec![
-        Vertex { position: [-0.5, -0.5, -0.5], color: [0.9, 0.9, 0.9] },
-        Vertex { position: [-0.5, 0.5, 0.5], color: [0.9, 0.9, 0.9] },
-        Vertex { position: [-0.5, -0.5, 0.5], color: [0.9, 0.9, 0.9] },
-        Vertex { position: [-0.5, 0.5, -0.5], color: [0.9, 0.9, 0.9] },
-        Vertex { position: [0.5, -0.5, -0.5], color: [0.8, 0.8, 0.1] },
-        Vertex { position: [0.5, 0.5, 0.5], color: [0.8, 0.8, 0.1] },
-        Vertex { position: [0.5, -0.5, 0.5], color: [0.8, 0.8, 0.1] },
-        Vertex { position: [0.5, 0.5, -0.5], color: [0.8, 0.8, 0.1] },
-        Vertex { position: [-0.5, -0.5, -0.5], color: [0.9, 0.6, 0.1] },
-        Vertex { position: [0.5, -0.5, 0.5], color: [0.9, 0.6, 0.1] },
-        Vertex { position: [-0.5, -0.5, 0.5], color: [0.9, 0.6, 0.1] },
-        Vertex { position: [0.5, -0.5, -0.5], color: [0.9, 0.6, 0.1] },
-        Vertex { position: [-0.5, 0.5, -0.5], color: [0.8, 0.1, 0.1] },
-        Vertex { position: [0.5, 0.5, 0.5], color: [0.8, 0.1, 0.1] },
-        Vertex { position: [-0.5, 0.5, 0.5], color: [0.8, 0.1, 0.1] },
-        Vertex { position: [0.5, 0.5, -0.5], color: [0.8, 0.1, 0.1] },
-        Vertex { position: [-0.5, -0.5, 0.5], color: [0.1, 0.1, 0.8] },
-        Vertex { position: [0.5, 0.5, 0.5], color: [0.1, 0.1, 0.8] },
-        Vertex { position: [-0.5, 0.5, 0.5], color: [0.1, 0.1, 0.8] },
-        Vertex { position: [0.5, -0.5, 0.5], color: [0.1, 0.1, 0.8] },
-        Vertex { position: [-0.5, -0.5, -0.5], color: [0.1, 0.8, 0.1] },
-        Vertex { position: [0.5, 0.5, -0.5], color: [0.1, 0.8, 0.1] },
-        Vertex { position: [-0.5, 0.5, -0.5], color: [0.1, 0.8, 0.1] },
-        Vertex { position: [0.5, -0.5, -0.5], color: [0.1, 0.8, 0.1] },
-    ];
-
-    for i in 0..vertices.len() { 
-        vertices[i].position[0] += offset[0];
-        vertices[i].position[1] += offset[1];
-        vertices[i].position[2] += offset[2];
-    };
-
-    let indices: Vec<u32> = vec![0, 1, 2, 0, 3, 1, 4, 5, 6, 4, 7, 5, 8, 9, 10, 8, 11, 9,
-        12, 13, 14, 12, 15, 13, 16, 17, 18, 16, 19, 17, 20, 21, 22, 20, 23, 21];
-
-    let model = Arc::new(Model::new(renderer, vertices, Some(indices), None));
-
-    model
-}
 
 fn create_game_objects(renderer: &Renderer) -> Vec<GameObject> {
-    let cube_model = cube_model(renderer, [0.0, 0.0, 0.0]);
+    let cube_model = Arc::new(Model::load_obj(renderer, "models/smooth_vase.obj"));
 
     let mut game_objects = vec![];
 
-    let mut cube = GameObject::new(Some(cube_model));
-    cube.transform.translation = [0.0, 0.0, 2.5].into();
-    cube.transform.scale = [0.5, 0.5, 0.5].into();
-    game_objects.push(cube);
+    let mut game_object = GameObject::new(Some(cube_model));
+    game_object.transform.translation = [0.0, 0.0, 2.5].into();
+    game_object.transform.scale = [3.0; 3].into();
+    game_objects.push(game_object);
     
     game_objects
 }
 
 fn animate_game_objects(game_objects: Arc<Mutex<Vec<GameObject>>>, dt: f32) {
-    for obj in game_objects.lock().unwrap().iter_mut() {
-        obj.transform.rotation.y += 1.0 * dt * std::f32::consts::PI * 2.0;
-        obj.transform.rotation.x += 0.5 * dt * std::f32::consts::PI * 2.0;
-    }
+    // for obj in game_objects.lock().unwrap().iter_mut() {
+    //     obj.transform.rotation.y += 1.0 * dt * std::f32::consts::PI * 2.0;
+    //     obj.transform.rotation.x += 0.5 * dt * std::f32::consts::PI * 2.0;
+    // }
 }
 
 pub struct VkApp {

@@ -72,7 +72,7 @@ impl Renderer {
         let event_loop = EventLoop::new();
 
         let surface = WindowBuilder::new()
-            .with_title("Release")
+            .with_title("Vike")
             .with_inner_size(LogicalSize::new(800 as f64, 600 as f64))
             .with_resizable(true)
             .build_vk_surface(&event_loop, instance.clone())

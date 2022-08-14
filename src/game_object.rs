@@ -1,13 +1,41 @@
 use crate::renderer::Renderer;
-use crate::simple_render_system::Vertex;
 
-use vulkano::DeviceSize;
+use bytemuck::{Pod, Zeroable};
+use tobj::load_obj;
+use vulkano::{DeviceSize, impl_vertex};
 use vulkano::buffer::{CpuAccessibleBuffer, BufferUsage, DeviceLocalBuffer, BufferContents};
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBuffer};
 use vulkano::sync::GpuFuture;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use nalgebra::{Matrix4, Vector3};
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+pub struct Vertex {
+    pub position: [f32; 3],
+    pub color: [f32; 3],
+    pub normal: [f32; 3],
+    pub uv: [f32; 2],
+}
+impl_vertex!(Vertex, position, color, normal, uv);
+
+impl PartialEq for Vertex {
+    fn eq(&self, other: &Self) -> bool {
+        self.position == other.position &&
+        self.color == other.color &&
+        self.normal == other.normal &&
+        self.uv == other.uv
+    }
+}
+impl Eq for Vertex {}
+impl Hash for Vertex {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_bytes().hash(state);
+    }
+}
 
 #[derive(Clone)]
 pub struct Transform3D {
@@ -81,20 +109,14 @@ impl GameObject {
 
 pub struct Model {
     pub vertex_buffer: Arc<DeviceLocalBuffer<[Vertex]>>,
-    pub normals_buffer: Option<Arc<DeviceLocalBuffer<[Vertex]>>>,
     pub index_buffer: Option<Arc<DeviceLocalBuffer<[u32]>>>,
 }
 
 impl Model {
-    pub fn new(renderer: &Renderer, vertices: Vec<Vertex>, indices: Option<Vec<u32>>, normals: Option<Vec<Vertex>>) -> Self {
+    pub fn new(renderer: &Renderer, vertices: Vec<Vertex>, indices: Option<Vec<u32>>) -> Self {
 
         let vertex_buffer = Model::create_device_local_buffer(renderer, vertices, BufferUsage::vertex_buffer());
 
-        let normals_buffer = if normals.is_some() { Some( 
-            Model::create_device_local_buffer(renderer, normals.unwrap(), BufferUsage::all())
-        )} else {
-            None
-        };
         let index_buffer = if indices.is_some() { Some( 
             Model::create_device_local_buffer(renderer, indices.unwrap(), BufferUsage::index_buffer())
         )} else {
@@ -103,7 +125,6 @@ impl Model {
 
         Self {
             vertex_buffer,
-            normals_buffer,
             index_buffer,
         }
     }
@@ -148,5 +169,79 @@ impl Model {
             .wait(None).unwrap();
 
         device_local_buffer
+    }
+
+    pub fn load_obj(renderer: &Renderer, filepath: &str) -> Model {
+        let cornell_box = load_obj(
+            filepath, 
+            &tobj::GPU_LOAD_OPTIONS,
+        );
+        let (models, _materials) = cornell_box.expect("Failed to load obj");
+        // let _materials = materials.expect("Failed to load materials");
+
+        let mesh = &models[0].mesh;
+
+        let has_normals = !mesh.normals.is_empty();
+        let has_uvs = !mesh.texcoords.is_empty();
+        let has_colors = !mesh.vertex_color.is_empty();
+
+        let mut unique_vertices: HashMap<Vertex, u32> = HashMap::new();
+        let mut vertices: Vec<Vertex> = Vec::new();
+        let mut indices: Vec<u32> = Vec::new();
+
+        for i in &mesh.indices {
+            let index = *i as usize;
+
+            let position = [
+                mesh.positions[index * 3 + 0],
+                mesh.positions[index * 3 + 1],
+                mesh.positions[index * 3 + 2],
+            ];
+
+            let mut normal = [0.0, 0.0, 0.0];
+            if has_normals {
+                normal = [
+                    mesh.normals[index * 3 + 0],
+                    mesh.normals[index * 3 + 1],
+                    mesh.normals[index * 3 + 2],
+                ];
+            }
+
+            let mut uv = [0.0, 0.0];
+            if has_uvs {
+                uv = [
+                    mesh.texcoords[index * 2 + 0],
+                    mesh.texcoords[index * 2 + 1],
+                ];
+            }
+
+            let mut color = [1.0, 1.0, 1.0];
+            if has_colors {
+                color = [
+                    mesh.vertex_color[index * 3 + 0],
+                    mesh.vertex_color[index * 3 + 1],
+                    mesh.vertex_color[index * 3 + 2],
+                ];
+            }
+
+            let vertex = Vertex {
+                position,
+                normal,
+                uv,
+                color,
+            };
+
+            let index = unique_vertices.entry(vertex).or_insert_with(|| {
+                vertices.push(vertex);
+                vertices.len() as u32 - 1
+            });
+            indices.push(*index);
+        }
+
+        Model::new(
+            renderer, 
+            vertices, 
+            Some(indices), 
+        )
     }
 }

@@ -1,10 +1,9 @@
 use crate::{
     renderer::Renderer,
-    game_object::GameObject,
+    game_object::{Vertex, GameObject},
     camera::Camera,
 };
 
-use bytemuck::{Pod, Zeroable};
 use std::sync::{Arc, Mutex};
 use vulkano::{
     buffer::TypedBufferAccess,
@@ -12,7 +11,6 @@ use vulkano::{
         PrimaryAutoCommandBuffer, AutoCommandBufferBuilder
     },
     image::SampleCount,
-    impl_vertex,
     pipeline::{
         graphics::{
             input_assembly::{InputAssemblyState, PrimitiveTopology}, 
@@ -42,14 +40,6 @@ mod fs {
         path: "shaders/simple_shader.frag"
     }
 }
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct Vertex {
-    pub position: [f32; 3],
-    pub color: [f32; 3],
-}
-impl_vertex!(Vertex, position, color);
 
 pub struct SimpleRenderSystem {
     pub pipeline: Arc<GraphicsPipeline>,
@@ -166,19 +156,12 @@ impl SimpleRenderSystem {
                 transform: (projection_view * obj.transform.mat4()).into(),
                 color: obj.color,
             };
-            builder.push_constants(self.pipeline.layout().clone(), 0, push_constants);
 
             let model = obj.model.clone().unwrap();
 
-            if model.normals_buffer.is_none() {
-                builder.bind_vertex_buffers(0, model.vertex_buffer.clone());
-            }
-            else {
-                builder.bind_vertex_buffers(0, (
-                    model.vertex_buffer.clone(), 
-                    model.normals_buffer.clone().unwrap(),
-                ));
-            }
+            builder.push_constants(self.pipeline.layout().clone(), 0, push_constants)
+                .bind_vertex_buffers(0, model.vertex_buffer.clone());
+
             if model.index_buffer.is_none() {
                 builder.draw(model.vertex_buffer.len() as u32, 1, 0, 0).unwrap();
             }
