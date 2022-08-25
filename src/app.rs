@@ -16,19 +16,25 @@ use winit::{
 use std::io::Write;
 
 fn create_game_objects(renderer: &Renderer) -> Vec<GameObject> {
-    let smooth_vase = Arc::new(Model::load_obj(renderer, "models/smooth_vase.obj"));
-    let flat_vase = Arc::new(Model::load_obj(renderer, "models/flat_vase.obj"));
+    let smooth_vase_model = Arc::new(Model::load_obj(renderer, "models/smooth_vase.obj"));
+    let flat_vase_model = Arc::new(Model::load_obj(renderer, "models/flat_vase.obj"));
+    let floor_model = Arc::new(Model::load_obj(renderer, "models/quad.obj"));
 
     let mut game_objects = vec![];
 
-    let mut game_object = GameObject::new(Some(smooth_vase.clone()));
-    game_object.transform.translation = [-0.5, 0.0, 2.5].into();
+    let mut game_object = GameObject::new(Some(smooth_vase_model.clone()));
+    game_object.transform.translation = [-0.5, 0.5, 0.0].into();
     game_object.transform.scale = [2.0; 3].into();
     game_objects.push(game_object);
 
-    let mut game_object = GameObject::new(Some(flat_vase.clone()));
-    game_object.transform.translation = [0.5, 0.0, 2.5].into();
+    let mut game_object = GameObject::new(Some(flat_vase_model.clone()));
+    game_object.transform.translation = [0.5, 0.5, 0.0].into();
     game_object.transform.scale = [2.0; 3].into();
+    game_objects.push(game_object);
+
+    let mut game_object = GameObject::new(Some(floor_model.clone()));
+    game_object.transform.translation = [0.0, 0.5, 0.0].into();
+    game_object.transform.scale = [3.0, 1.0, 3.0].into();
     game_objects.push(game_object);
     
     game_objects
@@ -60,7 +66,9 @@ impl VkApp {
         let obj_vec = create_game_objects(&renderer);
         let game_objects = Arc::new(Mutex::new(obj_vec));
 
-        let camera = Arc::new(Mutex::new(Camera::new(Some(GameObject::new(None)))));
+        let mut camera_object = GameObject::new(None);
+        camera_object.transform.translation.z = -2.5; 
+        let camera = Arc::new(Mutex::new(Camera::new(Some(camera_object))));
 
         let uniform_buffer = CpuBufferPool::<vs::ty::UniformBufferData>::uniform_buffer(renderer.device.clone());
 
@@ -99,7 +107,7 @@ impl VkApp {
 
                     let dimensions = self.renderer.swapchain.image_extent();
                     let aspect = dimensions[0] as f32 / dimensions[1] as f32;
-                    self.camera.lock().unwrap().set_perspective_projection(50.0_f32.to_radians(), aspect, 0.1, 10.0);
+                    self.camera.lock().unwrap().set_perspective_projection(50.0_f32.to_radians(), aspect, 0.1, 500.0);
                     
                     if let Some((mut builder, acquire_future, rebuild_pipeline
                         )) = self.renderer.begin_frame() {
@@ -113,7 +121,10 @@ impl VkApp {
 
                             let uniform_data = vs::ty::UniformBufferData {
                                 projectionView: projection_view.into(),
-                                lightDirection: [1.0, 1.0, 1.0],
+                                ambientLightColor: [1.0, 1.0, 1.0, 0.02].into(),
+                                lightPosition: [-1.0, -1.0, -1.0].into(),
+                                lightColor: [1.0; 4].into(),
+                                _dummy0: [0; 4],
                             };
                             self.uniform_buffer.next(uniform_data).unwrap()
                         };
