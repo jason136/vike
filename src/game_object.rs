@@ -267,6 +267,8 @@ impl Model {
             indices.push(*index);
         }
 
+        println!("{} unique vertices", vertices.len());
+
         Model::new(
             renderer, 
             vertices, 

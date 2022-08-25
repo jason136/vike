@@ -5,6 +5,7 @@ use crate::{
 };
 
 use std::sync::{Arc, Mutex};
+use std::collections::BTreeMap;
 use vulkano::{
     buffer::TypedBufferAccess,
     command_buffer::{
@@ -15,26 +16,32 @@ use vulkano::{
         graphics::{
             input_assembly::{InputAssemblyState, PrimitiveTopology}, 
             rasterization::{RasterizationState, PolygonMode, CullMode, FrontFace},
-            multisample::{MultisampleState},
+            multisample::MultisampleState,
             color_blend::ColorBlendState,
             depth_stencil::{DepthStencilState, DepthState, CompareOp},
             vertex_input::BuffersDefinition,
             viewport::{ViewportState, Viewport},
         },
-        layout::{PipelineLayoutCreateInfo, PushConstantRange},
-        GraphicsPipeline, PipelineLayout, StateMode, PartialStateMode, Pipeline,
+        layout::{PushConstantRange, PipelineLayoutCreateInfo},
+        GraphicsPipeline, StateMode, PartialStateMode, Pipeline, PipelineLayout, PipelineBindPoint,
     },
-    shader::ShaderStages, render_pass::Subpass,
+    shader::{ShaderStages, DescriptorRequirements}, 
+    render_pass::Subpass, descriptor_set::{layout::{DescriptorSetLayout, DescriptorSetLayoutCreateInfo, DescriptorSetLayoutBinding, DescriptorType}, PersistentDescriptorSet, DescriptorSet}, NonExhaustive, 
 };
 
-mod vs {
+pub mod vs {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "shaders/simple_shader.vert"
+        path: "shaders/simple_shader.vert",
+        types_meta: {
+            use bytemuck::{Pod, Zeroable};
+
+            #[derive(Clone, Copy, Zeroable, Pod)]
+        },
     }
 }
 
-mod fs {
+pub mod fs {
     vulkano_shaders::shader! {
         ty: "fragment",
         path: "shaders/simple_shader.frag"
@@ -103,42 +110,48 @@ impl SimpleRenderSystem {
             ..Default::default()
         };
 
-        let push_constant_range = PushConstantRange {
-            stages: ShaderStages {
-                vertex: true, 
-                fragment: true,
-                ..Default::default()
-            },
-            offset: 0,
-            size: std::mem::size_of::<vs::ty::PushConstantData>() as u32,
-        };
-        let pipeline_layout = PipelineLayout::new(
-            renderer.device.clone(), 
-            PipelineLayoutCreateInfo{
-                set_layouts: vec![],
-                push_constant_ranges: vec![push_constant_range],
-                ..Default::default()
-            }
-        ).expect("Failed to create pipeline layout");
+        // let push_constant_range = PushConstantRange {
+        //     stages: ShaderStages {
+        //         vertex: true, 
+        //         fragment: true,
+        //         ..Default::default()
+        //     },
+        //     offset: 0,
+        //     size: std::mem::size_of::<vs::ty::PushConstantData>() as u32,
+        // };
+        // let set_layout = DescriptorSetLayout::new(
+        //     renderer.device.clone(), 
+        //      DescriptorSetLayoutCreateInfo::from_requirements(
+        //         vs::ty::,
+        //      )[0]
+        // ).unwrap();
+        // let pipeline_layout = PipelineLayout::new(
+        //     renderer.device.clone(), 
+        //     PipelineLayoutCreateInfo{
+        //         set_layouts: vec![set_layout],
+        //         push_constant_ranges: vec![push_constant_range],
+        //         ..Default::default()
+        //     }
+        // ).expect("Failed to create pipeline layout");
 
         let pipeline = GraphicsPipeline::start()
-        .vertex_input_state(
-            BuffersDefinition::new()
-                .vertex::<Vertex>()
-        )
-        .vertex_shader(vs.entry_point("main").expect("Failed to set vertex shader"), ())
-        .input_assembly_state(input_assembly_state)
-        .viewport_state(viewport_state)
-        .fragment_shader(fs.entry_point("main").expect("Failed to set fragment shader"), ())
-        .depth_stencil_state(depth_stencil_state)
-        .render_pass(Subpass::from(renderer.render_pass.clone(), 0).unwrap())
-        
-        .rasterization_state(rasterization_state)
-        .multisample_state(multisample_state)
-        .color_blend_state(color_blend_state)
-        .with_pipeline_layout(renderer.device.clone(), pipeline_layout.clone())
-        .expect("Failed to create graphics pipeline");
-        
+            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
+            .vertex_shader(vs.entry_point("main").expect("Failed to set vertex shader"), ())
+            .input_assembly_state(input_assembly_state)
+            .viewport_state(viewport_state)
+            .fragment_shader(fs.entry_point("main").expect("Failed to set fragment shader"), ())
+            .depth_stencil_state(depth_stencil_state)
+            .render_pass(Subpass::from(renderer.render_pass.clone(), 0).unwrap())
+            
+            .rasterization_state(rasterization_state)
+            .multisample_state(multisample_state)
+            .color_blend_state(color_blend_state)
+
+            // .with_pipeline_layout(renderer.device.clone(), pipeline_layout.clone())
+            .build(renderer.device.clone())
+
+            .expect("Failed to create graphics pipeline");
+
         pipeline
     }
 
@@ -146,21 +159,18 @@ impl SimpleRenderSystem {
         &self,
         mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, 
         game_objects: Arc<Mutex<Vec<GameObject>>>,
-        camera: Arc<Mutex<Camera>>,
-    ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {   
-        let camera = camera.lock().unwrap();
-        let projection_view = camera.projection_matrix * camera.view_matrix;
-
+    ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
         for obj in game_objects.lock().unwrap().iter().rev() {
-            let model_matrix = obj.transform.mat4();
             let push_constants = vs::ty::PushConstantData {
-                transform: (projection_view * model_matrix).into(),
+                modelMatrix: obj.transform.mat4().into(),
                 normalMatrix: obj.transform.normal_matrix().into(),
             };
 
             let model = obj.model.clone().unwrap();
 
-            builder.push_constants(self.pipeline.layout().clone(), 0, push_constants)
+            builder
+                .bind_pipeline_graphics(self.pipeline.clone())
+                .push_constants(self.pipeline.layout().clone(), 0, push_constants)
                 .bind_vertex_buffers(0, model.vertex_buffer.clone());
 
             if model.index_buffer.is_none() {

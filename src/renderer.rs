@@ -1,7 +1,3 @@
-use crate::{
-    simple_render_system::SimpleRenderSystem,
-};
-
 use std::sync::Arc;
 use vulkano::{
     command_buffer::{
@@ -81,8 +77,7 @@ impl Renderer {
         (event_loop, surface, instance)
     }
 
-    pub fn begin_frame(&mut self, simple_render_system: &SimpleRenderSystem
-    ) -> Option<(AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, SwapchainAcquireFuture<Window>, bool)> {
+    pub fn begin_frame(&mut self) -> Option<(AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, SwapchainAcquireFuture<Window>, bool)> {
         let dimensions = self.surface.window().inner_size();
         if dimensions.width == 0 || dimensions.height == 0 {
             return None
@@ -141,8 +136,7 @@ impl Renderer {
                     ..RenderPassBeginInfo::framebuffer(self.framebuffers[self.image_index].clone())
                 },
                 SubpassContents::Inline,
-            ).unwrap()
-            .bind_pipeline_graphics(simple_render_system.pipeline.clone());
+            ).unwrap();
             
         Some((builder, acquire_future, self.recreate_swapchain))
     }
@@ -266,7 +260,7 @@ impl Renderer {
                     image_usage: ImageUsage::color_attachment(), 
                     composite_alpha: surface_capabilities
                         .supported_composite_alpha.iter().next().unwrap(),
-                    present_mode: PresentMode::Immediate,
+                    present_mode: PresentMode::Fifo,
                     ..Default::default()
                 }
             ).expect("Failed to create swapchain")
@@ -312,7 +306,7 @@ impl Renderer {
             AttachmentImage::transient(device.clone(), dimensions, Format::D16_UNORM).unwrap(),
         ).unwrap();
     
-        images
+        let framebuffers = images
             .iter().map(|image| {
                 let view = ImageView::new_default(image.clone()).unwrap();
                 Framebuffer::new(
@@ -322,6 +316,8 @@ impl Renderer {
                         ..Default::default()
                     },
                 ).unwrap()
-            }).collect::<Vec<_>>()
+            }).collect::<Vec<_>>();
+
+        framebuffers
     }
 }
