@@ -6,8 +6,8 @@ use crate::{
     movement::KeyboardController,
 };
 
-use std::{sync::{Arc, Mutex}, time::Instant};
-use vulkano::{buffer::{CpuBufferPool, BufferUsage, BufferContents}, descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet}, pipeline::PipelineBindPoint};
+use std::{sync::{Arc, Mutex}, time::Instant, collections::HashMap};
+use vulkano::{buffer::CpuBufferPool, descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet}, pipeline::PipelineBindPoint};
 use vulkano::pipeline::Pipeline;
 use winit::{
     event::{Event, WindowEvent, ElementState, VirtualKeyCode},
@@ -15,32 +15,32 @@ use winit::{
 };
 use std::io::Write;
 
-fn create_game_objects(renderer: &Renderer) -> Vec<GameObject> {
+fn create_game_objects(renderer: &Renderer) -> HashMap<u32, GameObject> {
     let smooth_vase_model = Arc::new(Model::load_obj(renderer, "models/smooth_vase.obj"));
     let flat_vase_model = Arc::new(Model::load_obj(renderer, "models/flat_vase.obj"));
     let floor_model = Arc::new(Model::load_obj(renderer, "models/quad.obj"));
 
-    let mut game_objects = vec![];
+    let mut game_objects: HashMap<u32, GameObject> = HashMap::new();
 
     let mut game_object = GameObject::new(Some(smooth_vase_model.clone()));
     game_object.transform.translation = [-0.5, 0.5, 0.0].into();
     game_object.transform.scale = [2.0; 3].into();
-    game_objects.push(game_object);
+    game_objects.insert(game_object.id, game_object);
 
     let mut game_object = GameObject::new(Some(flat_vase_model.clone()));
     game_object.transform.translation = [0.5, 0.5, 0.0].into();
     game_object.transform.scale = [2.0; 3].into();
-    game_objects.push(game_object);
+    game_objects.insert(game_object.id, game_object);
 
     let mut game_object = GameObject::new(Some(floor_model.clone()));
     game_object.transform.translation = [0.0, 0.5, 0.0].into();
     game_object.transform.scale = [3.0, 1.0, 3.0].into();
-    game_objects.push(game_object);
+    game_objects.insert(game_object.id, game_object);
     
     game_objects
 }
 
-fn animate_game_objects(game_objects: Arc<Mutex<Vec<GameObject>>>, dt: f32) {
+fn animate_game_objects(game_objects: HashMap<u32, GameObject>, dt: f32) {
     // for obj in game_objects.lock().unwrap().iter_mut() {
     //     obj.transform.rotation.y += 1.0 * dt * std::f32::consts::PI * 2.0;
     //     obj.transform.rotation.x += 0.5 * dt * std::f32::consts::PI * 2.0;
@@ -51,8 +51,8 @@ pub struct VkApp {
     pub event_loop: EventLoop<()>,
     pub renderer: Renderer,
     pub simple_render_system: SimpleRenderSystem,
-    pub game_objects: Arc<Mutex<Vec<GameObject>>>,
-    pub camera: Arc<Mutex<Camera>>,
+    pub game_objects: HashMap<u32, GameObject>,
+    pub camera: Camera,
     pub uniform_buffer: CpuBufferPool<vs::ty::UniformBufferData>,
 }
 
@@ -63,12 +63,11 @@ impl VkApp {
 
         let simple_render_system = SimpleRenderSystem::new(&renderer);
 
-        let obj_vec = create_game_objects(&renderer);
-        let game_objects = Arc::new(Mutex::new(obj_vec));
+        let game_objects = create_game_objects(&renderer);
 
         let mut camera_object = GameObject::new(None);
         camera_object.transform.translation.z = -2.5; 
-        let camera = Arc::new(Mutex::new(Camera::new(Some(camera_object))));
+        let camera = Camera::new(Some(camera_object));
 
         let uniform_buffer = CpuBufferPool::<vs::ty::UniformBufferData>::uniform_buffer(renderer.device.clone());
 
@@ -102,22 +101,20 @@ impl VkApp {
                         frames = vec![];
                     }
 
-                    camera_controller.move_xz(delta_time, &mut self.camera.lock().unwrap().object.as_mut().unwrap());
-                    self.camera.lock().unwrap().match_obj_transform();
+                    camera_controller.move_xz(delta_time, &mut self.camera.object.as_mut().unwrap());
+                    self.camera.match_obj_transform();
 
                     let dimensions = self.renderer.swapchain.image_extent();
                     let aspect = dimensions[0] as f32 / dimensions[1] as f32;
-                    self.camera.lock().unwrap().set_perspective_projection(50.0_f32.to_radians(), aspect, 0.1, 500.0);
+                    self.camera.set_perspective_projection(50.0_f32.to_radians(), aspect, 0.1, 500.0);
                     
-                    if let Some((mut builder, acquire_future, rebuild_pipeline
-                        )) = self.renderer.begin_frame() {
+                    if let Some((mut builder, acquire_future, rebuild_pipeline)) = self.renderer.begin_frame() {
                         if rebuild_pipeline {
                             self.simple_render_system.pipeline = SimpleRenderSystem::create_pipeline(&self.renderer);
                         }
 
                         let uniform_buffer_subbuffer = {
-                            let camera = self.camera.lock().unwrap();
-                            let projection_view = camera.projection_matrix * camera.view_matrix;
+                            let projection_view = self.camera.projection_matrix * self.camera.view_matrix;
 
                             let uniform_data = vs::ty::UniformBufferData {
                                 projectionView: projection_view.into(),

@@ -4,7 +4,7 @@ use crate::{
     camera::Camera,
 };
 
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}, collections::HashMap};
 use std::collections::BTreeMap;
 use vulkano::{
     buffer::TypedBufferAccess,
@@ -110,30 +110,6 @@ impl SimpleRenderSystem {
             ..Default::default()
         };
 
-        // let push_constant_range = PushConstantRange {
-        //     stages: ShaderStages {
-        //         vertex: true, 
-        //         fragment: true,
-        //         ..Default::default()
-        //     },
-        //     offset: 0,
-        //     size: std::mem::size_of::<vs::ty::PushConstantData>() as u32,
-        // };
-        // let set_layout = DescriptorSetLayout::new(
-        //     renderer.device.clone(), 
-        //      DescriptorSetLayoutCreateInfo::from_requirements(
-        //         vs::ty::,
-        //      )[0]
-        // ).unwrap();
-        // let pipeline_layout = PipelineLayout::new(
-        //     renderer.device.clone(), 
-        //     PipelineLayoutCreateInfo{
-        //         set_layouts: vec![set_layout],
-        //         push_constant_ranges: vec![push_constant_range],
-        //         ..Default::default()
-        //     }
-        // ).expect("Failed to create pipeline layout");
-
         let pipeline = GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
             .vertex_shader(vs.entry_point("main").expect("Failed to set vertex shader"), ())
@@ -147,9 +123,7 @@ impl SimpleRenderSystem {
             .multisample_state(multisample_state)
             .color_blend_state(color_blend_state)
 
-            // .with_pipeline_layout(renderer.device.clone(), pipeline_layout.clone())
             .build(renderer.device.clone())
-
             .expect("Failed to create graphics pipeline");
 
         pipeline
@@ -158,15 +132,19 @@ impl SimpleRenderSystem {
     pub fn render_game_objects(
         &self,
         mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, 
-        game_objects: Arc<Mutex<Vec<GameObject>>>,
+        game_objects: HashMap<u32, GameObject>,
     ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
-        for obj in game_objects.lock().unwrap().iter().rev() {
+        for (_k, obj) in game_objects.into_iter() {
+            if obj.model.is_none() {
+                continue;
+            }
+
+            let model = obj.model.clone().unwrap();
+
             let push_constants = vs::ty::PushConstantData {
                 modelMatrix: obj.transform.mat4().into(),
                 normalMatrix: obj.transform.normal_matrix().into(),
             };
-
-            let model = obj.model.clone().unwrap();
 
             builder
                 .bind_pipeline_graphics(self.pipeline.clone())
