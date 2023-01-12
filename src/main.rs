@@ -1,6 +1,6 @@
 mod app;
 mod renderer;
-mod simple_render_system;
+mod render_systems;
 mod game_object;
 mod camera;
 mod movement;

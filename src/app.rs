@@ -1,5 +1,6 @@
 use crate::{
-    simple_render_system::{SimpleRenderSystem, vs},
+    render_systems::simple_render_system::{SimpleRenderSystem, vs},
+    render_systems::billboard_render_system::PointLightSystem,
     renderer::Renderer,
     game_object::{GameObject, Model},
     camera::Camera,
@@ -51,6 +52,7 @@ pub struct VkApp {
     pub event_loop: EventLoop<()>,
     pub renderer: Renderer,
     pub simple_render_system: SimpleRenderSystem,
+    pub billboard_system: PointLightSystem,
     pub game_objects: HashMap<u32, GameObject>,
     pub camera: Camera,
     pub uniform_buffer: CpuBufferPool<vs::ty::UniformBufferData>,
@@ -62,6 +64,7 @@ impl VkApp {
         let renderer = Renderer::new(instance, surface);
 
         let simple_render_system = SimpleRenderSystem::new(&renderer);
+        let billboard_system = PointLightSystem::new(&renderer);
 
         let game_objects = create_game_objects(&renderer);
 
@@ -76,6 +79,7 @@ impl VkApp {
             renderer, 
             uniform_buffer,
             simple_render_system,
+            billboard_system,
             game_objects,
             camera,
         }
@@ -114,10 +118,9 @@ impl VkApp {
                         }
 
                         let uniform_buffer_subbuffer = {
-                            let projection_view = self.camera.projection_matrix * self.camera.view_matrix;
-
                             let uniform_data = vs::ty::UniformBufferData {
-                                projectionView: projection_view.into(),
+                                projection: self.camera.projection_matrix.into(),
+                                view: self.camera.view_matrix.into(),
                                 ambientLightColor: [1.0, 1.0, 1.0, 0.02].into(),
                                 lightPosition: [-1.0, -1.0, -1.0].into(),
                                 lightColor: [1.0; 4].into(),
@@ -144,6 +147,7 @@ impl VkApp {
                             builder, 
                             self.game_objects.clone(),
                         );
+                        // builder = self.billboard_system.render(builder);
                         self.renderer.end_frame(builder, acquire_future);
                     }
                 },
