@@ -1,13 +1,11 @@
 use crate::{
     renderer::Renderer,
-    game_object::{Vertex, GameObject},
-    camera::Camera,
+    game_object::Vertex,
 };
 
-use std::{sync::{Arc, Mutex}, collections::HashMap};
-use std::collections::BTreeMap;
+use std::sync::Arc;
 use vulkano::{
-    buffer::TypedBufferAccess,
+    buffer::cpu_pool::CpuBufferPoolSubbuffer,
     command_buffer::{
         PrimaryAutoCommandBuffer, AutoCommandBufferBuilder
     },
@@ -22,15 +20,17 @@ use vulkano::{
             vertex_input::BuffersDefinition,
             viewport::{ViewportState, Viewport},
         },
-        layout::{PushConstantRange, PipelineLayoutCreateInfo},
-        GraphicsPipeline, StateMode, PartialStateMode, Pipeline, PipelineLayout, PipelineBindPoint,
-    }, render_pass::Subpass,
+        GraphicsPipeline, StateMode, PartialStateMode, Pipeline, PipelineBindPoint,
+    },
+    render_pass::Subpass, descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet}, memory::pool::StdMemoryPool, 
 };
+
+use crate::render_systems::simple_render_system;
 
 pub mod vs {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "shaders/billboard.vert",
+        path: "shaders/billboard_shader.vert",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
 
@@ -42,19 +42,19 @@ pub mod vs {
 pub mod fs {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "shaders/billboard.frag"
+        path: "shaders/billboard_shader.frag"
     }
 }
 
-pub struct PointLightSystem {
+pub struct BillboardSystem {
     pub pipeline: Arc<GraphicsPipeline>,
 }
 
-impl PointLightSystem {
-    pub fn new(renderer: &Renderer) -> PointLightSystem {
-        let pipeline = PointLightSystem::create_pipeline(renderer);
+impl BillboardSystem {
+    pub fn new(renderer: &Renderer) -> BillboardSystem {
+        let pipeline = BillboardSystem::create_pipeline(renderer);
 
-        PointLightSystem {
+        BillboardSystem {
             pipeline,
         }
     }
@@ -130,7 +130,20 @@ impl PointLightSystem {
     pub fn render(
         &self,
         mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, 
+        uniform_buffer_subbuffer: Arc<CpuBufferPoolSubbuffer<simple_render_system::vs::ty::UniformBufferData, Arc<StdMemoryPool>>>,
     ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
+
+        let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
+        let set = PersistentDescriptorSet::new(
+            layout.clone(), 
+            [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
+        ).unwrap();
+        builder.bind_descriptor_sets(
+            PipelineBindPoint::Graphics, 
+            self.pipeline.layout().clone(), 
+            0,
+            set.clone(), 
+        );
 
         builder
             .bind_pipeline_graphics(self.pipeline.clone())

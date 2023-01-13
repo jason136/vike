@@ -1,13 +1,11 @@
 use crate::{
     renderer::Renderer,
     game_object::{Vertex, GameObject},
-    camera::Camera,
 };
 
-use std::{sync::{Arc, Mutex}, collections::HashMap};
-use std::collections::BTreeMap;
+use std::{sync::Arc, collections::HashMap};
 use vulkano::{
-    buffer::TypedBufferAccess,
+    buffer::{TypedBufferAccess, cpu_pool::CpuBufferPoolSubbuffer},
     command_buffer::{
         PrimaryAutoCommandBuffer, AutoCommandBufferBuilder
     },
@@ -22,11 +20,9 @@ use vulkano::{
             vertex_input::BuffersDefinition,
             viewport::{ViewportState, Viewport},
         },
-        layout::{PushConstantRange, PipelineLayoutCreateInfo},
-        GraphicsPipeline, StateMode, PartialStateMode, Pipeline, PipelineLayout, PipelineBindPoint,
+        GraphicsPipeline, StateMode, PartialStateMode, Pipeline, PipelineBindPoint,
     },
-    shader::{ShaderStages, DescriptorRequirements}, 
-    render_pass::Subpass, descriptor_set::{layout::{DescriptorSetLayout, DescriptorSetLayoutCreateInfo, DescriptorSetLayoutBinding, DescriptorType}, PersistentDescriptorSet, DescriptorSet}, NonExhaustive, 
+    render_pass::Subpass, descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet}, memory::pool::StdMemoryPool, 
 };
 
 pub mod vs {
@@ -132,8 +128,22 @@ impl SimpleRenderSystem {
     pub fn render_game_objects(
         &self,
         mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, 
+        uniform_buffer_subbuffer: Arc<CpuBufferPoolSubbuffer<vs::ty::UniformBufferData, Arc<StdMemoryPool>>>,
         game_objects: HashMap<u32, GameObject>,
     ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
+
+        let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
+        let set = PersistentDescriptorSet::new(
+            layout.clone(), 
+            [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
+        ).unwrap();
+        builder.bind_descriptor_sets(
+            PipelineBindPoint::Graphics, 
+            self.pipeline.layout().clone(), 
+            0,
+            set.clone(), 
+        );
+
         for (_k, obj) in game_objects.into_iter() {
             if obj.model.is_none() {
                 continue;

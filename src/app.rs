@@ -1,15 +1,14 @@
 use crate::{
     render_systems::simple_render_system::{SimpleRenderSystem, vs},
-    render_systems::billboard_render_system::PointLightSystem,
+    render_systems::billboard_render_system::BillboardSystem,
     renderer::Renderer,
     game_object::{GameObject, Model},
     camera::Camera,
     movement::KeyboardController,
 };
 
-use std::{sync::{Arc, Mutex}, time::Instant, collections::HashMap};
-use vulkano::{buffer::CpuBufferPool, descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet}, pipeline::PipelineBindPoint};
-use vulkano::pipeline::Pipeline;
+use std::{sync::Arc, time::Instant, collections::HashMap};
+use vulkano::buffer::CpuBufferPool;
 use winit::{
     event::{Event, WindowEvent, ElementState, VirtualKeyCode},
     event_loop::{ControlFlow, EventLoop},
@@ -41,18 +40,18 @@ fn create_game_objects(renderer: &Renderer) -> HashMap<u32, GameObject> {
     game_objects
 }
 
-fn animate_game_objects(game_objects: HashMap<u32, GameObject>, dt: f32) {
-    // for obj in game_objects.lock().unwrap().iter_mut() {
-    //     obj.transform.rotation.y += 1.0 * dt * std::f32::consts::PI * 2.0;
-    //     obj.transform.rotation.x += 0.5 * dt * std::f32::consts::PI * 2.0;
-    // }
+fn animate_game_objects(mut game_objects: HashMap<u32, GameObject>, dt: f32) {
+    for (_, obj) in game_objects.iter_mut() {
+        obj.transform.rotation.y += 1.0 * dt * std::f32::consts::PI * 2.0;
+        obj.transform.rotation.x += 0.5 * dt * std::f32::consts::PI * 2.0;
+    }
 }
 
 pub struct VkApp {
     pub event_loop: EventLoop<()>,
     pub renderer: Renderer,
     pub simple_render_system: SimpleRenderSystem,
-    pub billboard_system: PointLightSystem,
+    pub billboard_system: BillboardSystem,
     pub game_objects: HashMap<u32, GameObject>,
     pub camera: Camera,
     pub uniform_buffer: CpuBufferPool<vs::ty::UniformBufferData>,
@@ -64,7 +63,7 @@ impl VkApp {
         let renderer = Renderer::new(instance, surface);
 
         let simple_render_system = SimpleRenderSystem::new(&renderer);
-        let billboard_system = PointLightSystem::new(&renderer);
+        let billboard_system = BillboardSystem::new(&renderer);
 
         let game_objects = create_game_objects(&renderer);
 
@@ -115,6 +114,7 @@ impl VkApp {
                     if let Some((mut builder, acquire_future, rebuild_pipeline)) = self.renderer.begin_frame() {
                         if rebuild_pipeline {
                             self.simple_render_system.pipeline = SimpleRenderSystem::create_pipeline(&self.renderer);
+                            self.billboard_system.pipeline = BillboardSystem::create_pipeline(&self.renderer);
                         }
 
                         let uniform_buffer_subbuffer = {
@@ -129,25 +129,17 @@ impl VkApp {
                             self.uniform_buffer.next(uniform_data).unwrap()
                         };
 
-                        let layout = self.simple_render_system.pipeline.layout().set_layouts().get(0).unwrap();
-                        let set = PersistentDescriptorSet::new(
-                            layout.clone(), 
-                            [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
-                        ).unwrap();
-                        builder.bind_descriptor_sets(
-                            PipelineBindPoint::Graphics, 
-                            self.simple_render_system.pipeline.layout().clone(), 
-                            0,
-                            set.clone(), 
-                        );
-
                         animate_game_objects(self.game_objects.clone(), delta_time);
 
                         builder = self.simple_render_system.render_game_objects(
                             builder, 
+                            uniform_buffer_subbuffer.clone(),
                             self.game_objects.clone(),
                         );
-                        // builder = self.billboard_system.render(builder);
+                        builder = self.billboard_system.render(
+                            builder, 
+                            uniform_buffer_subbuffer,
+                        );
                         self.renderer.end_frame(builder, acquire_future);
                     }
                 },
