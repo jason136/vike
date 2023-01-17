@@ -1,6 +1,6 @@
 use crate::{
-    render_systems::simple_render_system::{SimpleRenderSystem, vs},
-    render_systems::billboard_render_system::BillboardSystem,
+    render_systems::standard_render_system::{StandardRenderSystem, vs},
+    render_systems::billboard_render_system::BillboardRenderSystem,
     renderer::Renderer,
     game_object::{GameObject, Model},
     camera::Camera,
@@ -8,6 +8,7 @@ use crate::{
 };
 
 use std::{sync::Arc, time::Instant, collections::HashMap};
+use nalgebra::Vector3;
 use vulkano::buffer::CpuBufferPool;
 use winit::{
     event::{Event, WindowEvent, ElementState, VirtualKeyCode},
@@ -36,6 +37,9 @@ fn create_game_objects(renderer: &Renderer) -> HashMap<u32, GameObject> {
     game_object.transform.translation = [0.0, 0.5, 0.0].into();
     game_object.transform.scale = [3.0, 1.0, 3.0].into();
     game_objects.insert(game_object.id, game_object);
+
+    // let point_light = GameObject::new_point_light(0.2, 0.1, Vector3::new(1.0, 1.0, 1.0));
+    // game_objects.insert(point_light.id, point_light);
     
     game_objects
 }
@@ -50,8 +54,8 @@ fn animate_game_objects(mut game_objects: HashMap<u32, GameObject>, dt: f32) {
 pub struct VkApp {
     pub event_loop: EventLoop<()>,
     pub renderer: Renderer,
-    pub simple_render_system: SimpleRenderSystem,
-    pub billboard_system: BillboardSystem,
+    pub simple_render_system: StandardRenderSystem,
+    pub billboard_render_system: BillboardRenderSystem,
     pub game_objects: HashMap<u32, GameObject>,
     pub camera: Camera,
     pub uniform_buffer: CpuBufferPool<vs::ty::UniformBufferData>,
@@ -62,8 +66,8 @@ impl VkApp {
         let (event_loop, surface, instance) = Renderer::create_window();
         let renderer = Renderer::new(instance, surface);
 
-        let simple_render_system = SimpleRenderSystem::new(&renderer);
-        let billboard_system = BillboardSystem::new(&renderer);
+        let simple_render_system = StandardRenderSystem::new(&renderer);
+        let billboard_render_system = BillboardRenderSystem::new(&renderer);
 
         let game_objects = create_game_objects(&renderer);
 
@@ -78,7 +82,7 @@ impl VkApp {
             renderer, 
             uniform_buffer,
             simple_render_system,
-            billboard_system,
+            billboard_render_system,
             game_objects,
             camera,
         }
@@ -111,35 +115,39 @@ impl VkApp {
                     let aspect = dimensions[0] as f32 / dimensions[1] as f32;
                     self.camera.set_perspective_projection(50.0_f32.to_radians(), aspect, 0.1, 500.0);
                     
-                    if let Some((mut builder, acquire_future, rebuild_pipeline)) = self.renderer.begin_frame() {
-                        if rebuild_pipeline {
-                            self.simple_render_system.pipeline = SimpleRenderSystem::create_pipeline(&self.renderer);
-                            self.billboard_system.pipeline = BillboardSystem::create_pipeline(&self.renderer);
-                        }
+                    let uniform_buffer_subbuffer = {
+                        let (num_lights, point_lights) = self.billboard_render_system.update_point_lights(self.game_objects.clone());
 
-                        let uniform_buffer_subbuffer = {
-                            let uniform_data = vs::ty::UniformBufferData {
-                                projection: self.camera.projection_matrix.into(),
-                                view: self.camera.view_matrix.into(),
-                                ambientLightColor: [1.0, 1.0, 1.0, 0.02].into(),
-                                lightPosition: [-1.0, -1.0, -1.0].into(),
-                                lightColor: [1.0; 4].into(),
-                                _dummy0: [0; 4],
-                            };
-                            self.uniform_buffer.next(uniform_data).unwrap()
+                        let mut uniform_data = vs::ty::UniformBufferData {
+                            projection: self.camera.projection_matrix.into(),
+                            view: self.camera.view_matrix.into(),
+                            ambientLightColor: [1.0, 1.0, 1.0, 0.02].into(),
+                            pointLights: point_lights,
+                            numLights: num_lights,
                         };
 
-                        animate_game_objects(self.game_objects.clone(), delta_time);
+                        self.uniform_buffer.next(uniform_data).unwrap()
+                    };
+
+                    animate_game_objects(self.game_objects.clone(), delta_time);
+
+                    if let Some((mut builder, acquire_future, rebuild_pipeline)) = self.renderer.begin_frame() {
+                        if rebuild_pipeline {
+                            self.simple_render_system.pipeline = StandardRenderSystem::create_pipeline(&self.renderer);
+                            self.billboard_render_system.pipeline = BillboardRenderSystem::create_pipeline(&self.renderer);
+                        }
 
                         builder = self.simple_render_system.render_game_objects(
                             builder, 
                             uniform_buffer_subbuffer.clone(),
                             self.game_objects.clone(),
                         );
-                        builder = self.billboard_system.render(
+                        builder = self.billboard_render_system.render(
                             builder, 
                             uniform_buffer_subbuffer,
+                            self.game_objects.clone(),
                         );
+
                         self.renderer.end_frame(builder, acquire_future);
                     }
                 },

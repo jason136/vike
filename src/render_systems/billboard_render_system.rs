@@ -1,9 +1,9 @@
 use crate::{
     renderer::Renderer,
-    game_object::Vertex,
+    game_object::{Vertex, self, GameObject},
 };
 
-use std::sync::Arc;
+use std::{sync::Arc, collections::HashMap};
 use vulkano::{
     buffer::cpu_pool::CpuBufferPoolSubbuffer,
     command_buffer::{
@@ -25,7 +25,7 @@ use vulkano::{
     render_pass::Subpass, descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet}, memory::pool::StdMemoryPool, 
 };
 
-use crate::render_systems::simple_render_system;
+use crate::render_systems::standard_render_system;
 
 pub mod vs {
     vulkano_shaders::shader! {
@@ -46,15 +46,23 @@ pub mod fs {
     }
 }
 
-pub struct BillboardSystem {
+const MAX_POINT_LIGHTS: usize = 10;
+
+#[derive(Clone, Copy)]
+pub struct PointLightUBO {
+    pub position: [f32; 4],
+    pub color: [f32; 4],
+}
+
+pub struct BillboardRenderSystem {
     pub pipeline: Arc<GraphicsPipeline>,
 }
 
-impl BillboardSystem {
-    pub fn new(renderer: &Renderer) -> BillboardSystem {
-        let pipeline = BillboardSystem::create_pipeline(renderer);
+impl BillboardRenderSystem {
+    pub fn new(renderer: &Renderer) -> BillboardRenderSystem {
+        let pipeline = BillboardRenderSystem::create_pipeline(renderer);
 
-        BillboardSystem {
+        BillboardRenderSystem {
             pipeline,
         }
     }
@@ -127,10 +135,34 @@ impl BillboardSystem {
         pipeline
     }
 
+    pub fn update_point_lights(
+        &self, 
+        game_objects: HashMap<u32, GameObject>,
+    ) -> (i32, [standard_render_system::vs::ty::PointLight; MAX_POINT_LIGHTS]) {
+        let mut point_lights = [standard_render_system::vs::ty::PointLight {
+            position: [0.0, 0.0, 0.0, 0.0],
+            color: [0.0, 0.0, 0.0, 0.0],
+        }; MAX_POINT_LIGHTS];
+
+        let mut light_index: usize = 0;
+        for obj in game_objects.values() {
+            if let Some(light) = obj.point_light {
+                point_lights[light_index] = standard_render_system::vs::ty::PointLight {
+                    position: [obj.transform.translation.x, obj.transform.translation.y, obj.transform.translation.z, 1.0],
+                    color: [obj.color.x, obj.color.y, obj.color.z, light.light_intensity],
+                };
+                light_index += 1;
+            }
+        }
+
+        (light_index as i32, point_lights)
+    }
+
     pub fn render(
         &self,
         mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, 
-        uniform_buffer_subbuffer: Arc<CpuBufferPoolSubbuffer<simple_render_system::vs::ty::UniformBufferData, Arc<StdMemoryPool>>>,
+        uniform_buffer_subbuffer: Arc<CpuBufferPoolSubbuffer<standard_render_system::vs::ty::UniformBufferData, Arc<StdMemoryPool>>>,
+        game_objects: HashMap<u32, GameObject>,
     ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
 
         let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
@@ -145,9 +177,45 @@ impl BillboardSystem {
             set.clone(), 
         );
 
-        builder
-            .bind_pipeline_graphics(self.pipeline.clone())
-            .draw(6, 1, 0, 0).unwrap();
+        for obj in game_objects.values() {
+            if obj.point_light.is_none() {
+                continue;
+            }
+
+            let light = obj.point_light.unwrap();
+            
+            for obj in game_objects.values() {
+
+                let push_constants = vs::ty::PushConstantData {
+                    position: [obj.transform.translation.x, obj.transform.translation.y, obj.transform.translation.z, 1.0],
+                    color: [obj.color.x, obj.color.y, obj.color.z, light.light_intensity],
+                    radius: obj.transform.scale.x,
+                };
+
+                builder
+                .bind_pipeline_graphics(self.pipeline.clone())
+                .push_constants(self.pipeline.layout().clone(), 0, push_constants)
+                .draw(6, 1, 0, 0).unwrap();
+            }
+        }
+
+
+        //     let model = obj.model.clone().unwrap();
+
+
+
+        //     if model.index_buffer.is_none() {
+        //         builder.draw(model.vertex_buffer.len() as u32, 1, 0, 0).unwrap();
+        //     }
+        //     else {
+        //         builder.bind_index_buffer(model.index_buffer.clone().unwrap())
+        //         .draw_indexed(model.index_buffer.clone().unwrap().len() as u32, 1, 0, 0, 0).unwrap();
+        //     }
+        // }
+
+        // builder
+        //     .bind_pipeline_graphics(self.pipeline.clone())
+        //     .push_constants(self.pipeline.layout().clone(), 0, push_constants)
 
         builder
     }

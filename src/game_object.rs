@@ -106,14 +106,20 @@ impl Transform3D {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct PointLight {
+    pub light_intensity: f32,
+}
+
 static GAME_OBJECT_COUNT: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone)]
 pub struct GameObject {
     pub id: u32,
     pub transform: Transform3D,
-    pub color: [f32; 3],
+    pub color: Vector3<f32>,
     pub model: Option<Arc<Model>>,
+    pub point_light: Option<PointLight>,
 }
 
 impl GameObject {
@@ -130,8 +136,28 @@ impl GameObject {
         GameObject {
             id,
             transform,
-            color: [0.0, 0.0, 0.0],
+            color: Vector3::new(0.0, 0.0, 0.0),
             model,
+            point_light: None,
+        }
+    }
+
+    pub fn new_point_light(light_intensity: f32, radius: f32, color: Vector3<f32>) -> GameObject {
+        let id = GAME_OBJECT_COUNT.load(Ordering::SeqCst);
+        GAME_OBJECT_COUNT.fetch_add(1, Ordering::SeqCst);
+
+        let transform = Transform3D {
+            translation: Vector3::new(0.0, 0.0, 0.0),
+            scale: Vector3::new(radius, 1.0, 1.0),
+            rotation: Vector3::new(0.0, 0.0, 0.0),
+        };
+
+        GameObject {
+            id,
+            transform,
+            color: color.into(),
+            model: None,
+            point_light: Some(PointLight { light_intensity }),
         }
     }
 }

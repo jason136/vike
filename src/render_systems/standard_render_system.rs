@@ -28,7 +28,7 @@ use vulkano::{
 pub mod vs {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "shaders/simple_shader.vert",
+        path: "shaders/standard_shader.vert",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
 
@@ -40,19 +40,19 @@ pub mod vs {
 pub mod fs {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "shaders/simple_shader.frag"
+        path: "shaders/standard_shader.frag"
     }
 }
 
-pub struct SimpleRenderSystem {
+pub struct StandardRenderSystem {
     pub pipeline: Arc<GraphicsPipeline>,
 }
 
-impl SimpleRenderSystem {
-    pub fn new(renderer: &Renderer) -> SimpleRenderSystem {
-        let pipeline = SimpleRenderSystem::create_pipeline(renderer);
+impl StandardRenderSystem {
+    pub fn new(renderer: &Renderer) -> StandardRenderSystem {
+        let pipeline = StandardRenderSystem::create_pipeline(renderer);
 
-        SimpleRenderSystem {
+        StandardRenderSystem {
             pipeline,
         }
     }
@@ -144,12 +144,12 @@ impl SimpleRenderSystem {
             set.clone(), 
         );
 
-        for (_k, obj) in game_objects.into_iter() {
+        for obj in game_objects.values() {
             if obj.model.is_none() {
                 continue;
             }
 
-            let model = obj.model.clone().unwrap();
+            let model = obj.model.as_ref().unwrap();
 
             let push_constants = vs::ty::PushConstantData {
                 modelMatrix: obj.transform.mat4().into(),

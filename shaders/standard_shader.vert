@@ -14,14 +14,18 @@ layout(push_constant) uniform PushConstantData {
     mat4 normalMatrix;
 } push;
 
-layout(set = 0, binding = 0) uniform UniformBufferData {
-    mat4 projection;
-    mat4 view;
-    vec4 ambientLightColor;
-    vec3 lightPosition;
-    vec4 lightColor;
-} ubo;
+struct PointLight {
+  vec4 position;
+  vec4 color;
+};
 
+layout(set = 0, binding = 0) uniform UniformBufferData {
+  mat4 projection;
+  mat4 view;
+  vec4 ambientLightColor;
+  PointLight pointLights[10];
+  int numLights;
+} ubo;
 const float ambient = 0.02;
 
 void main() {
