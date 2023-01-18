@@ -20,7 +20,7 @@ impl Camera {
         left: f32, right: f32, 
         top: f32, bottom: f32, 
         near: f32, far: f32,
-    ) {
+    ) { 
         self.projection_matrix = Matrix4::from_column_slice(&[
             2.0 / (right - left), 0.0, 0.0, 0.0,
 

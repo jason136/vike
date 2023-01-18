@@ -8,7 +8,7 @@ use crate::{
 };
 
 use std::{sync::Arc, time::Instant, collections::HashMap};
-use nalgebra::Vector3;
+use nalgebra::{Vector3, Rotation3};
 use vulkano::buffer::CpuBufferPool;
 use winit::{
     event::{Event, WindowEvent, ElementState, VirtualKeyCode},
@@ -38,16 +38,41 @@ fn create_game_objects(renderer: &Renderer) -> HashMap<u32, GameObject> {
     game_object.transform.scale = [3.0, 1.0, 3.0].into();
     game_objects.insert(game_object.id, game_object);
 
-    // let point_light = GameObject::new_point_light(0.2, 0.1, Vector3::new(1.0, 1.0, 1.0));
-    // game_objects.insert(point_light.id, point_light);
+    let light_colors = vec![
+        Vector3::new(1.0, 0.1, 0.1),
+        Vector3::new(0.1, 0.1, 1.0),
+        Vector3::new(0.1, 1.0, 0.1),
+        Vector3::new(1.0, 1.0, 0.1),
+        Vector3::new(0.1, 1.0, 1.0),
+        Vector3::new(1.0, 1.0, 1.0),
+    ];
+
+    for i in 0..light_colors.len() {
+        let mut point_light = GameObject::new_point_light(0.2, 0.1, light_colors[i]);
+
+        let rotation = Rotation3::from_axis_angle(
+            &Vector3::y_axis(), 
+            i as f32 * std::f32::consts::PI * 2.0 / light_colors.len() as f32
+        );
+
+        point_light.transform.translation = rotation * Vector3::new(-1.0, -1.0, -1.0);
+
+        game_objects.insert(point_light.id, point_light);
+    }
     
     game_objects
 }
 
-fn animate_game_objects(mut game_objects: HashMap<u32, GameObject>, dt: f32) {
-    for (_, obj) in game_objects.iter_mut() {
-        obj.transform.rotation.y += 1.0 * dt * std::f32::consts::PI * 2.0;
-        obj.transform.rotation.x += 0.5 * dt * std::f32::consts::PI * 2.0;
+fn animate_game_objects(game_objects: &mut HashMap<u32, GameObject>, dt: f32) {
+    for obj in game_objects.values_mut() {
+        if obj.point_light.is_some() {
+            let rotation = Rotation3::from_axis_angle(
+                &Vector3::y_axis(), 
+                dt
+            );
+    
+            obj.transform.translation = rotation * obj.transform.translation;    
+        }
     }
 }
 
@@ -108,6 +133,8 @@ impl VkApp {
                         frames = vec![];
                     }
 
+                    animate_game_objects(&mut self.game_objects, delta_time);
+
                     camera_controller.move_xz(delta_time, &mut self.camera.object.as_mut().unwrap());
                     self.camera.match_obj_transform();
 
@@ -118,7 +145,7 @@ impl VkApp {
                     let uniform_buffer_subbuffer = {
                         let (num_lights, point_lights) = self.billboard_render_system.update_point_lights(self.game_objects.clone());
 
-                        let mut uniform_data = vs::ty::UniformBufferData {
+                        let uniform_data = vs::ty::UniformBufferData {
                             projection: self.camera.projection_matrix.into(),
                             view: self.camera.view_matrix.into(),
                             ambientLightColor: [1.0, 1.0, 1.0, 0.02].into(),
@@ -128,8 +155,6 @@ impl VkApp {
 
                         self.uniform_buffer.next(uniform_data).unwrap()
                     };
-
-                    animate_game_objects(self.game_objects.clone(), delta_time);
 
                     if let Some((mut builder, acquire_future, rebuild_pipeline)) = self.renderer.begin_frame() {
                         if rebuild_pipeline {

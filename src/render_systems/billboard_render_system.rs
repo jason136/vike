@@ -1,6 +1,6 @@
 use crate::{
     renderer::Renderer,
-    game_object::{Vertex, self, GameObject},
+    game_object::{Vertex, GameObject},
 };
 
 use std::{sync::Arc, collections::HashMap};
@@ -184,38 +184,17 @@ impl BillboardRenderSystem {
 
             let light = obj.point_light.unwrap();
             
-            for obj in game_objects.values() {
+            let push_constants = vs::ty::PushConstantData {
+                position: [obj.transform.translation.x, obj.transform.translation.y, obj.transform.translation.z, 1.0],
+                color: [obj.color.x, obj.color.y, obj.color.z, light.light_intensity],
+                radius: obj.transform.scale.x,
+            };
 
-                let push_constants = vs::ty::PushConstantData {
-                    position: [obj.transform.translation.x, obj.transform.translation.y, obj.transform.translation.z, 1.0],
-                    color: [obj.color.x, obj.color.y, obj.color.z, light.light_intensity],
-                    radius: obj.transform.scale.x,
-                };
-
-                builder
+            builder
                 .bind_pipeline_graphics(self.pipeline.clone())
                 .push_constants(self.pipeline.layout().clone(), 0, push_constants)
                 .draw(6, 1, 0, 0).unwrap();
-            }
         }
-
-
-        //     let model = obj.model.clone().unwrap();
-
-
-
-        //     if model.index_buffer.is_none() {
-        //         builder.draw(model.vertex_buffer.len() as u32, 1, 0, 0).unwrap();
-        //     }
-        //     else {
-        //         builder.bind_index_buffer(model.index_buffer.clone().unwrap())
-        //         .draw_indexed(model.index_buffer.clone().unwrap().len() as u32, 1, 0, 0, 0).unwrap();
-        //     }
-        // }
-
-        // builder
-        //     .bind_pipeline_graphics(self.pipeline.clone())
-        //     .push_constants(self.pipeline.layout().clone(), 0, push_constants)
 
         builder
     }
