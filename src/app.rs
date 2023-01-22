@@ -148,6 +148,7 @@ impl VkApp {
                         let uniform_data = vs::ty::UniformBufferData {
                             projection: self.camera.projection_matrix.into(),
                             view: self.camera.view_matrix.into(),
+                            inverseView: self.camera.inverse_view_matrix.into(),
                             ambientLightColor: [1.0, 1.0, 1.0, 0.02].into(),
                             pointLights: point_lights,
                             numLights: num_lights,

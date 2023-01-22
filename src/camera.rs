@@ -5,6 +5,7 @@ pub struct Camera {
     pub object: Option<GameObject>,
     pub projection_matrix: Matrix4<f32>,
     pub view_matrix: Matrix4<f32>,
+    pub inverse_view_matrix: Matrix4<f32>,
 }
 
 impl Camera {
@@ -13,6 +14,7 @@ impl Camera {
             object,
             projection_matrix: Matrix4::identity(),
             view_matrix: Matrix4::identity(),
+            inverse_view_matrix: Matrix4::identity(),
         }
     }
 
@@ -61,7 +63,14 @@ impl Camera {
             u.y, v.y, w.y, 0.0, 
             u.z, v.z, w.z, 0.0, 
             -u.dot(&position), -v.dot(&position), -w.dot(&position), 1.0,
-        ])
+        ]);
+
+        self.inverse_view_matrix = Matrix4::from_column_slice(&[
+            u.x, u.y, u.z, 0.0, 
+            v.x, v.y, v.z, 0.0, 
+            w.x, w.y, w.z, 0.0, 
+            position.x, position.y, position.z, 1.0,
+        ]);
     }
 
     pub fn set_view_target(&mut self, position: Vector3<f32>, target: Vector3<f32>, up: Vector3<f32>) {
@@ -98,6 +107,13 @@ impl Camera {
             u.y, v.y, w.y, 0.0, 
             u.z, v.z, w.z, 0.0, 
             -u.dot(&position), -v.dot(&position), -w.dot(&position), 1.0,
-        ])
+        ]);
+        
+        self.inverse_view_matrix = Matrix4::from_column_slice(&[
+            u.x, u.y, u.z, 0.0, 
+            v.x, v.y, v.z, 0.0, 
+            w.x, w.y, w.z, 0.0, 
+            position.x, position.y, position.z, 1.0,
+        ]);
     }
 }

@@ -176,9 +176,7 @@ impl Renderer {
             enumerate_portability: true,
             ..Default::default()
         }).expect("Failed to create instance");
-        println!("API Version: {:#?}", instance.api_version());
-        println!("Extensions: {:#?}", instance.enabled_extensions());
-        println!("Layers: {:#?}", instance.enabled_layers());
+
         instance
     }
 
@@ -208,11 +206,11 @@ impl Renderer {
                 }
             }).expect("No suitable physical device found.");
 
-        println!(
-            "Using device: {} (type: {:?})",
-            physical_device.properties().device_name,
-            physical_device.properties().device_type
-        );
+        // println!(
+        //     "Using device: {} (type: {:?})",
+        //     physical_device.properties().device_name,
+        //     physical_device.properties().device_type
+        // );
 
         let (device, mut queues) = Device::new(
             physical_device,
@@ -247,7 +245,6 @@ impl Renderer {
             if !available_image_formats.contains(&image_format) {
                 image_format = available_image_formats[0];
             }
-            println!("Image Formats: {:?}", available_image_formats);
 
             Swapchain::new(
                 device.clone(), 
