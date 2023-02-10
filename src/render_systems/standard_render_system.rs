@@ -129,7 +129,7 @@ impl StandardRenderSystem {
         &self,
         mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, 
         uniform_buffer_subbuffer: Arc<CpuBufferPoolSubbuffer<vs::ty::UniformBufferData, Arc<StdMemoryPool>>>,
-        game_objects: HashMap<u32, GameObject>,
+        game_objects: &HashMap<u32, GameObject>,
     ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
 
         let layout = self.pipeline.layout().set_layouts().get(0).unwrap();

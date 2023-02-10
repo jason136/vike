@@ -143,7 +143,7 @@ impl VkApp {
                     self.camera.set_perspective_projection(50.0_f32.to_radians(), aspect, 0.1, 500.0);
                     
                     let uniform_buffer_subbuffer = {
-                        let (num_lights, point_lights) = self.billboard_render_system.update_point_lights(self.game_objects.clone());
+                        let (num_lights, point_lights) = self.billboard_render_system.update_point_lights(&self.game_objects);
 
                         let uniform_data = vs::ty::UniformBufferData {
                             projection: self.camera.projection_matrix.into(),
@@ -166,12 +166,13 @@ impl VkApp {
                         builder = self.simple_render_system.render_game_objects(
                             builder, 
                             uniform_buffer_subbuffer.clone(),
-                            self.game_objects.clone(),
+                            &self.game_objects,
                         );
                         builder = self.billboard_render_system.render(
                             builder, 
                             uniform_buffer_subbuffer,
-                            self.game_objects.clone(),
+                            &self.game_objects,
+                            &self.camera,
                         );
 
                         self.renderer.end_frame(builder, acquire_future);

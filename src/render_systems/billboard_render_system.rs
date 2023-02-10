@@ -1,9 +1,10 @@
 use crate::{
     renderer::Renderer,
-    game_object::{Vertex, GameObject},
+    game_object::{Vertex, GameObject}, camera::Camera,
 };
 
-use std::{sync::Arc, collections::HashMap};
+use std::{sync::Arc, collections::{HashMap}};
+use nalgebra::Vector3;
 use vulkano::{
     buffer::cpu_pool::CpuBufferPoolSubbuffer,
     command_buffer::{
@@ -15,7 +16,7 @@ use vulkano::{
             input_assembly::{InputAssemblyState, PrimitiveTopology}, 
             rasterization::{RasterizationState, PolygonMode, CullMode, FrontFace},
             multisample::MultisampleState,
-            color_blend::ColorBlendState,
+            color_blend::{ColorBlendState, ColorBlendAttachmentState, ColorComponents, AttachmentBlend, BlendOp, BlendFactor},
             depth_stencil::{DepthStencilState, DepthState, CompareOp},
             vertex_input::BuffersDefinition,
             viewport::{ViewportState, Viewport},
@@ -112,6 +113,18 @@ impl BillboardRenderSystem {
         };
 
         let color_blend_state = ColorBlendState {
+            attachments: vec![ColorBlendAttachmentState {
+                color_write_enable: StateMode::Fixed(true),
+                color_write_mask: ColorComponents::all(),
+                blend: Some(AttachmentBlend {
+                    color_op: BlendOp::Add,
+                    color_source: BlendFactor::SrcAlpha,
+                    color_destination: BlendFactor::OneMinusSrcAlpha,
+                    alpha_op: BlendOp::Add,
+                    alpha_source: BlendFactor::One,
+                    alpha_destination: BlendFactor::Zero,
+                }),
+            }],
             logic_op: None, 
             ..Default::default()
         };
@@ -137,7 +150,7 @@ impl BillboardRenderSystem {
 
     pub fn update_point_lights(
         &self, 
-        game_objects: HashMap<u32, GameObject>,
+        game_objects: &HashMap<u32, GameObject>,
     ) -> (i32, [standard_render_system::vs::ty::PointLight; MAX_POINT_LIGHTS]) {
         let mut point_lights = [standard_render_system::vs::ty::PointLight {
             position: [0.0, 0.0, 0.0, 0.0],
@@ -162,8 +175,21 @@ impl BillboardRenderSystem {
         &self,
         mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, 
         uniform_buffer_subbuffer: Arc<CpuBufferPoolSubbuffer<standard_render_system::vs::ty::UniformBufferData, Arc<StdMemoryPool>>>,
-        game_objects: HashMap<u32, GameObject>,
+        game_objects: &HashMap<u32, GameObject>,
+        camera: &Camera,
     ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
+
+        let mut sorted: Vec<(u32, u32)> = Vec::new();
+        for obj in game_objects.values() {
+            if obj.point_light.is_none() {
+                continue;
+            }
+
+            let offset = Vector3::new(camera.inverse_view_matrix.data.0[3][0], camera.inverse_view_matrix.data.0[3][1], camera.inverse_view_matrix.data.0[3][2]) - obj.transform.translation;
+            let dist_squared = offset.dot(&offset);
+            sorted.push(((dist_squared * 1000000000.0) as u32, obj.id));
+        }
+        sorted.sort_by(|&(a, _), &(b, _)| b.cmp(&a));
 
         let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
         let set = PersistentDescriptorSet::new(
@@ -177,10 +203,8 @@ impl BillboardRenderSystem {
             set.clone(), 
         );
 
-        for obj in game_objects.values() {
-            if obj.point_light.is_none() {
-                continue;
-            }
+        for (_, id) in sorted.into_iter() {
+            let obj = game_objects.get(&id).unwrap();
 
             let light = obj.point_light.unwrap();
             
