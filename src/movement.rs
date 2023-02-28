@@ -13,6 +13,14 @@ pub struct KeyboardController {
     pub look_right: bool,
     pub look_up: bool,
     pub look_down: bool,
+    pub disable_mouse_engaged: bool,
+    pub focused: bool,
+    pub cursor_in_window: bool,
+    pub occluded: bool,
+
+    pub focused_previous: bool,
+    pub mouse_engaged: bool,
+    pub mouse_delta: (f64, f64),
 
     pub move_speed: f32, 
     pub look_speed: f32,
@@ -31,18 +39,39 @@ impl KeyboardController {
             look_right: false,
             look_up: false,
             look_down: false,
+            disable_mouse_engaged: false,
+            focused: false,
+            cursor_in_window: false,
+            occluded: false,
+
+            focused_previous: false,
+            mouse_engaged: false,
+            mouse_delta: (0.0, 0.0),
 
             move_speed: 3.0,
-            look_speed: 1.5,
+            look_speed: 2.0,
         }
     }
 
-    pub fn move_xz(&self, dt: f32, game_object: &mut GameObject) {
+    pub fn move_xz(&mut self, dt: f32, game_object: &mut GameObject) {
         let mut rotate = Vector3::new(0.0, 0.0, 0.0);
         if self.look_right { rotate.y += 1.0; }
         if self.look_left { rotate.y -= 1.0; }
         if self.look_up { rotate.x += 1.0; }
         if self.look_down { rotate.x -= 1.0; }
+ 
+        if self.focused != self.focused_previous { 
+            println!("setting focused to {}", self.focused);
+            self.focused_previous = self.focused;
+            self.mouse_engaged = self.focused;
+        }
+        if self.disable_mouse_engaged { self.mouse_engaged = false; }
+
+        if self.mouse_engaged {
+            rotate.x -= self.mouse_delta.1 as f32 * self.look_speed;
+            rotate.y += self.mouse_delta.0 as f32 * self.look_speed;    
+        }
+        self.mouse_delta = (0.0, 0.0);
 
         if rotate.dot(&rotate) > 0.0 {
             game_object.transform.rotation += self.look_speed * dt * rotate.normalize();
