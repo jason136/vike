@@ -1,11 +1,5 @@
-mod app;
-mod renderer;
-mod render_systems;
-mod game_object;
-mod camera;
-mod movement;
+use vike::run;
 
 fn main() {
-    let app = app::VkApp::new();
-    app.main_loop();
+    pollster::block_on(run());
 }

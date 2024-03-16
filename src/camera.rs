@@ -1,17 +1,46 @@
-use crate::game_object::GameObject;
+use crate::game_object::Transform3D;
 use nalgebra::{Matrix4, Vector3};
 
 pub struct Camera {
-    pub object: Option<GameObject>,
+    pub transform: Option<Transform3D>,
     pub projection_matrix: Matrix4<f32>,
     pub view_matrix: Matrix4<f32>,
     pub inverse_view_matrix: Matrix4<f32>,
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CameraUniform {
+    view_proj: [[f32; 4]; 4],
+}
+
+impl CameraUniform {
+    pub fn new() -> Self {
+        CameraUniform {
+            view_proj: Matrix4::identity().into(),
+        }
+    }
+
+    pub fn update_view_proj(&mut self, camera: &Camera) {
+
+        #[rustfmt::skip]
+        let OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::from_column_slice(&[
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 0.5, 0.5,
+            0.0, 0.0, 0.0, 1.0,
+        ]);
+
+        self.view_proj =
+            (OPENGL_TO_WGPU_MATRIX * camera.projection_matrix * camera.view_matrix).into();
+    }
+}
+
+#[rustfmt::skip]
 impl Camera {
-    pub fn new(object: Option<GameObject>) -> Self {
+    pub fn new(transform: Option<Transform3D>) -> Self {
         Camera {
-            object,
+            transform,
             projection_matrix: Matrix4::identity(),
             view_matrix: Matrix4::identity(),
             inverse_view_matrix: Matrix4::identity(),
@@ -77,12 +106,10 @@ impl Camera {
         Camera::set_view_direction(self, position, target - position, up);
     }
 
-    pub fn match_obj_transform(&mut self) {
-        if self.object.is_none() { return; }
-        self.set_view_xyz(
-            self.object.as_ref().unwrap().transform.translation, 
-            self.object.as_ref().unwrap().transform.rotation,
-        );
+    pub fn match_transform(&mut self) {
+        if let Some(transform) = &self.transform {
+            self.set_view_xyz(transform.translation, transform.rotation);
+        }
     }
 
     pub fn set_view_xyz(&mut self, position: Vector3<f32>, rotation: Vector3<f32>) {

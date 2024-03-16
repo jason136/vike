@@ -6,12 +6,27 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-vulkano = "0.30.0"
-vulkano-win = "0.30.0"
-vulkano-shaders = "0.30.0"
+wgpu = "0.19"
+winit = { version = "0.29", default-features = false, features = ["rwh_06"] }
 
-bytemuck = { version = "1.7", features = ["derive", "extern_crate_std", "min_const_generics"] }
+cfg-if = "1"
+nalgebra = "0.32"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+pollster = "0.3"
+bytemuck = { version = "1.15", features = ["derive", "extern_crate_std", "min_const_generics"] }
+anyhow = "1.0"
+env_logger = "0.10"
+log = "0.4"
+tobj = { version = "4.0", features = ["async"] }
+getrandom = { version = "0.2", features = ["js"] }
 
-nalgebra = "0.31.1"
-tobj = "3.2.3"
-winit = "0.26"
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.6"
+console_log = "1.0"
+wgpu = { version = "0.19", features = ["webgl"]}
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3" }

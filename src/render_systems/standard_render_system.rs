@@ -1,28 +1,28 @@
 use crate::{
+    game_object::{GameObject, Vertex},
     renderer::Renderer,
-    game_object::{Vertex, GameObject},
 };
 
-use std::{sync::Arc, collections::HashMap};
+use std::{collections::HashMap, sync::Arc};
 use vulkano::{
-    buffer::{TypedBufferAccess, cpu_pool::CpuBufferPoolSubbuffer},
-    command_buffer::{
-        PrimaryAutoCommandBuffer, AutoCommandBufferBuilder
-    },
+    buffer::{cpu_pool::CpuBufferPoolSubbuffer, TypedBufferAccess},
+    command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     image::SampleCount,
+    memory::pool::StdMemoryPool,
     pipeline::{
         graphics::{
-            input_assembly::{InputAssemblyState, PrimitiveTopology}, 
-            rasterization::{RasterizationState, PolygonMode, CullMode, FrontFace},
-            multisample::MultisampleState,
             color_blend::ColorBlendState,
-            depth_stencil::{DepthStencilState, DepthState, CompareOp},
+            depth_stencil::{CompareOp, DepthState, DepthStencilState},
+            input_assembly::{InputAssemblyState, PrimitiveTopology},
+            multisample::MultisampleState,
+            rasterization::{CullMode, FrontFace, PolygonMode, RasterizationState},
             vertex_input::BuffersDefinition,
-            viewport::{ViewportState, Viewport},
+            viewport::{Viewport, ViewportState},
         },
-        GraphicsPipeline, StateMode, PartialStateMode, Pipeline, PipelineBindPoint,
+        GraphicsPipeline, PartialStateMode, Pipeline, PipelineBindPoint, StateMode,
     },
-    render_pass::Subpass, descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet}, memory::pool::StdMemoryPool, 
+    render_pass::Subpass,
 };
 
 pub mod vs {
@@ -52,14 +52,13 @@ impl StandardRenderSystem {
     pub fn new(renderer: &Renderer) -> StandardRenderSystem {
         let pipeline = StandardRenderSystem::create_pipeline(renderer);
 
-        StandardRenderSystem {
-            pipeline,
-        }
+        StandardRenderSystem { pipeline }
     }
 
     pub fn create_pipeline(renderer: &Renderer) -> Arc<GraphicsPipeline> {
         let vs = vs::load(renderer.device.clone()).expect("Failed to create vertex shader module");
-        let fs = fs::load(renderer.device.clone()).expect("Failed to create fragment shader module");
+        let fs =
+            fs::load(renderer.device.clone()).expect("Failed to create fragment shader module");
 
         let input_assembly_state = InputAssemblyState {
             topology: PartialStateMode::Fixed(PrimitiveTopology::TriangleList),
@@ -67,24 +66,22 @@ impl StandardRenderSystem {
         };
 
         let dimensions = renderer.surface.window().inner_size();
-        let viewport_state = ViewportState::viewport_fixed_scissor_irrelevant([
-            Viewport {
-                origin: [0.0, 0.0],
-                dimensions: [dimensions.width as f32, dimensions.height as f32],
-                depth_range: 0.0..1.0,
-            },
-        ]);
+        let viewport_state = ViewportState::viewport_fixed_scissor_irrelevant([Viewport {
+            origin: [0.0, 0.0],
+            dimensions: [dimensions.width as f32, dimensions.height as f32],
+            depth_range: 0.0..1.0,
+        }]);
 
         let depth_stencil_state = DepthStencilState {
-            depth: Some(DepthState{
-                enable_dynamic: false, 
+            depth: Some(DepthState {
+                enable_dynamic: false,
                 write_enable: StateMode::Fixed(true),
                 compare_op: StateMode::Fixed(CompareOp::Less),
             }),
             ..Default::default()
         };
 
-        let rasterization_state = RasterizationState{ 
+        let rasterization_state = RasterizationState {
             depth_clamp_enable: false,
             rasterizer_discard_enable: StateMode::Fixed(false),
             polygon_mode: PolygonMode::Fill,
@@ -92,7 +89,7 @@ impl StandardRenderSystem {
             cull_mode: StateMode::Fixed(CullMode::None),
             front_face: StateMode::Fixed(FrontFace::Clockwise),
             depth_bias: None,
-            ..Default::default() 
+            ..Default::default()
         };
 
         let multisample_state = MultisampleState {
@@ -102,23 +99,28 @@ impl StandardRenderSystem {
         };
 
         let color_blend_state = ColorBlendState {
-            logic_op: None, 
+            logic_op: None,
             ..Default::default()
         };
 
         let pipeline = GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
-            .vertex_shader(vs.entry_point("main").expect("Failed to set vertex shader"), ())
+            .vertex_shader(
+                vs.entry_point("main").expect("Failed to set vertex shader"),
+                (),
+            )
             .input_assembly_state(input_assembly_state)
             .viewport_state(viewport_state)
-            .fragment_shader(fs.entry_point("main").expect("Failed to set fragment shader"), ())
+            .fragment_shader(
+                fs.entry_point("main")
+                    .expect("Failed to set fragment shader"),
+                (),
+            )
             .depth_stencil_state(depth_stencil_state)
             .render_pass(Subpass::from(renderer.render_pass.clone(), 0).unwrap())
-            
             .rasterization_state(rasterization_state)
             .multisample_state(multisample_state)
             .color_blend_state(color_blend_state)
-
             .build(renderer.device.clone())
             .expect("Failed to create graphics pipeline");
 
@@ -127,21 +129,23 @@ impl StandardRenderSystem {
 
     pub fn render_game_objects(
         &self,
-        mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, 
-        uniform_buffer_subbuffer: Arc<CpuBufferPoolSubbuffer<vs::ty::UniformBufferData, Arc<StdMemoryPool>>>,
+        mut builder: AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        uniform_buffer_subbuffer: Arc<
+            CpuBufferPoolSubbuffer<vs::ty::UniformBufferData, Arc<StdMemoryPool>>,
+        >,
         game_objects: &HashMap<u32, GameObject>,
     ) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
-
         let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
         let set = PersistentDescriptorSet::new(
-            layout.clone(), 
+            layout.clone(),
             [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
-        ).unwrap();
+        )
+        .unwrap();
         builder.bind_descriptor_sets(
-            PipelineBindPoint::Graphics, 
-            self.pipeline.layout().clone(), 
+            PipelineBindPoint::Graphics,
+            self.pipeline.layout().clone(),
             0,
-            set.clone(), 
+            set.clone(),
         );
 
         for obj in game_objects.values() {
@@ -162,11 +166,14 @@ impl StandardRenderSystem {
                 .bind_vertex_buffers(0, model.vertex_buffer.clone());
 
             if model.index_buffer.is_none() {
-                builder.draw(model.vertex_buffer.len() as u32, 1, 0, 0).unwrap();
-            }
-            else {
-                builder.bind_index_buffer(model.index_buffer.clone().unwrap())
-                .draw_indexed(model.index_buffer.clone().unwrap().len() as u32, 1, 0, 0, 0).unwrap();
+                builder
+                    .draw(model.vertex_buffer.len() as u32, 1, 0, 0)
+                    .unwrap();
+            } else {
+                builder
+                    .bind_index_buffer(model.index_buffer.clone().unwrap())
+                    .draw_indexed(model.index_buffer.clone().unwrap().len() as u32, 1, 0, 0, 0)
+                    .unwrap();
             }
         }
 

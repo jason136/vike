@@ -1,6 +1,6 @@
-use nalgebra::{Vector3, clamp};
+use nalgebra::{clamp, Vector3};
 
-use crate::game_object::GameObject;
+use crate::game_object::Transform3D;
 
 pub struct KeyboardController {
     pub move_left: bool,
@@ -22,7 +22,7 @@ pub struct KeyboardController {
     pub mouse_engaged: bool,
     pub mouse_delta: (f64, f64),
 
-    pub move_speed: f32, 
+    pub move_speed: f32,
     pub look_speed: f32,
 }
 
@@ -53,47 +53,69 @@ impl KeyboardController {
         }
     }
 
-    pub fn move_xz(&mut self, dt: f32, game_object: &mut GameObject) {
+    pub fn move_xz(&mut self, dt: f32, transform: &mut Transform3D) {
         let mut rotate = Vector3::new(0.0, 0.0, 0.0);
-        if self.look_right { rotate.y += 1.0; }
-        if self.look_left { rotate.y -= 1.0; }
-        if self.look_up { rotate.x += 1.0; }
-        if self.look_down { rotate.x -= 1.0; }
- 
-        if self.focused != self.focused_previous { 
+        if self.look_right {
+            rotate.y += 1.0;
+        }
+        if self.look_left {
+            rotate.y -= 1.0;
+        }
+        if self.look_up {
+            rotate.x += 1.0;
+        }
+        if self.look_down {
+            rotate.x -= 1.0;
+        }
+
+        if self.focused != self.focused_previous {
             println!("setting focused to {}", self.focused);
             self.focused_previous = self.focused;
             self.mouse_engaged = self.focused;
         }
-        if self.disable_mouse_engaged { self.mouse_engaged = false; }
+        if self.disable_mouse_engaged {
+            self.mouse_engaged = false;
+        }
 
         if self.mouse_engaged {
             rotate.x -= self.mouse_delta.1 as f32 * self.look_speed;
-            rotate.y += self.mouse_delta.0 as f32 * self.look_speed;    
+            rotate.y += self.mouse_delta.0 as f32 * self.look_speed;
         }
         self.mouse_delta = (0.0, 0.0);
 
         if rotate.dot(&rotate) > 0.0 {
-            game_object.transform.rotation += self.look_speed * dt * rotate.normalize();
+            transform.rotation += self.look_speed * dt * rotate.normalize();
         }
-        game_object.transform.rotation.x = clamp(game_object.transform.rotation.x, -1.5, 1.5);
-        game_object.transform.rotation.y = game_object.transform.rotation.y % (std::f32::consts::PI * 2.0);
+        transform.rotation.x = clamp(transform.rotation.x, -1.5, 1.5);
+        transform.rotation.y = transform.rotation.y % (std::f32::consts::PI * 2.0);
 
-        let yaw = game_object.transform.rotation.y;
+        let yaw = transform.rotation.y;
         let forward_direction = Vector3::new(yaw.sin(), 0.0, yaw.cos());
         let right_direction = Vector3::new(forward_direction.z, 0.0, -forward_direction.x);
         let up_direction = Vector3::new(0.0, -1.0, 0.0);
 
         let mut move_direction = Vector3::new(0.0, 0.0, 0.0);
-        if self.move_forward { move_direction += forward_direction; }
-        if self.move_backward { move_direction -= forward_direction; }
-        if self.move_left { move_direction -= right_direction; }
-        if self.move_right { move_direction += right_direction; }
-        if self.move_up { move_direction += up_direction; }
-        if self.move_down { move_direction -= up_direction; }
+        if self.move_forward {
+            move_direction += forward_direction;
+        }
+        if self.move_backward {
+            move_direction -= forward_direction;
+        }
+        if self.move_left {
+            move_direction -= right_direction;
+        }
+        if self.move_right {
+            move_direction += right_direction;
+        }
+        if self.move_up {
+            move_direction += up_direction;
+        }
+        if self.move_down {
+            move_direction -= up_direction;
+        }
 
         if move_direction.dot(&move_direction) > 0.0 {
-            game_object.transform.translation += self.move_speed * dt * move_direction.normalize();
+            transform.translation += self.move_speed * dt * move_direction.normalize();
         }
     }
 }
