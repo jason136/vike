@@ -22,9 +22,8 @@ impl CameraUniform {
     }
 
     pub fn update_view_proj(&mut self, camera: &Camera) {
-
         #[rustfmt::skip]
-        let OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::from_column_slice(&[
+        let opengl_to_wgpu_matrix: Matrix4<f32> = Matrix4::from_column_slice(&[
             1.0, 0.0, 0.0, 0.0,
             0.0, 1.0, 0.0, 0.0,
             0.0, 0.0, 0.5, 0.5,
@@ -32,10 +31,11 @@ impl CameraUniform {
         ]);
 
         self.view_proj =
-            (OPENGL_TO_WGPU_MATRIX * camera.projection_matrix * camera.view_matrix).into();
+            (opengl_to_wgpu_matrix * camera.projection_matrix * camera.view_matrix).into();
     }
 }
 
+#[allow(dead_code)]
 #[rustfmt::skip]
 impl Camera {
     pub fn new(transform: Option<Transform3D>) -> Self {

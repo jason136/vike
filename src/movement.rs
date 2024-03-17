@@ -87,7 +87,7 @@ impl KeyboardController {
             transform.rotation += self.look_speed * dt * rotate.normalize();
         }
         transform.rotation.x = clamp(transform.rotation.x, -1.5, 1.5);
-        transform.rotation.y = transform.rotation.y % (std::f32::consts::PI * 2.0);
+        transform.rotation.y %= std::f32::consts::PI * 2.0;
 
         let yaw = transform.rotation.y;
         let forward_direction = Vector3::new(yaw.sin(), 0.0, yaw.cos());

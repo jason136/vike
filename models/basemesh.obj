@@ -1,6 +1,5 @@
 # Blender v3.1.2 OBJ File: 'basemesh.blend'
 # www.blender.org
-mtllib basemesh.mtl
 o Roundcube.002
 v 0.508344 -0.470372 -0.522659
 v 0.330342 -0.510127 -0.596998
