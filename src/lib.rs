@@ -1,20 +1,18 @@
 mod camera;
 mod game_object;
-mod movement;
 mod resources;
 mod texture;
-// mod render_systems;
 mod renderer;
 
 use game_object::GameObjectType;
+use instant::Duration;
 use nalgebra::{Rotation3, Vector3};
 use renderer::Renderer;
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc};
 use winit::dpi::LogicalSize;
-use winit::event::MouseButton;
+use winit::event::{DeviceEvent, MouseButton};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::{
-    dpi::LogicalPosition,
     event::{ElementState, Event, WindowEvent},
     event_loop::EventLoop,
     window::WindowBuilder,
@@ -23,8 +21,8 @@ use winit::{
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+use crate::camera::CameraController;
 use crate::game_object::{GameObject, Model};
-use crate::movement::KeyboardController;
 use crate::resources::load_model;
 
 async fn create_game_objects(
@@ -98,18 +96,19 @@ async fn create_game_objects(
     (game_objects, models)
 }
 
-fn animate_game_objects(game_objects: &mut HashMap<u32, GameObject>, dt: f32) {
+fn animate_game_objects(game_objects: &mut HashMap<u32, GameObject>, dt: Duration) {
+    let dt_secs = dt.as_secs_f32();
     for obj in game_objects.values_mut() {
         match obj.obj {
             GameObjectType::PointLight { .. } => {
-                let rotation = Rotation3::from_axis_angle(&Vector3::y_axis(), dt);
+                let rotation = Rotation3::from_axis_angle(&Vector3::y_axis(), dt_secs);
                 obj.transform.translation = rotation * obj.transform.translation;
             }
             GameObjectType::Model { .. } => {
-                let rotation = Rotation3::from_axis_angle(&Vector3::y_axis(), dt * 0.01);
+                let rotation = Rotation3::from_axis_angle(&Vector3::y_axis(), dt_secs * 0.01);
 
                 obj.transform.translation = rotation * obj.transform.translation;
-                obj.transform.rotation.y += dt * 0.1;
+                obj.transform.rotation.y += dt_secs * 0.1;
             }
         }
     }
@@ -163,9 +162,10 @@ pub async fn run() {
 
     let (mut game_objects, _models) = create_game_objects(&renderer).await;
 
-    let mut camera_controller = KeyboardController::new();
+    let mut camera_controller = CameraController::new(4.0, 0.4);
+    let mut focused = true;
 
-    let mut current_time = Instant::now();
+    let mut last_render_time = instant::Instant::now();
 
     event_loop
         .run(move |event, elwt| match event {
@@ -177,41 +177,17 @@ pub async fn run() {
                 ref event,
             } if window_id == renderer.window.id() && !renderer.input(event) => match event {
                 WindowEvent::RedrawRequested => {
-                    let new_time = Instant::now();
-                    let delta_time = new_time.duration_since(current_time).as_secs_f32();
-                    current_time = new_time;
+                    let now = instant::Instant::now();
+                    let dt = now - last_render_time;
+                    last_render_time = now;
 
-                    println!("FPS: {}", 1.0 / delta_time);
+                    // println!("FPS: {}", 1.0 / dt.as_secs_f32());
+                    println!("Camera: {:?}", renderer.camera);
 
-                    let dimensions = renderer.size;
-                    camera_controller
-                        .move_xz(delta_time, renderer.camera.transform.as_mut().unwrap());
-                    if camera_controller.mouse_engaged {
-                        renderer.window.set_cursor_visible(false);
-                        renderer
-                            .window
-                            .set_cursor_position(LogicalPosition::new(
-                                dimensions.width / 4,
-                                dimensions.height / 4,
-                            ))
-                            .unwrap();
-                    } else {
-                        renderer.window.set_cursor_visible(true);
-                    }
+                    animate_game_objects(&mut game_objects, dt);
+                    camera_controller.update_camera(&mut renderer.camera, dt);
+                    renderer.update(dt);
 
-                    renderer.camera.match_transform();
-
-                    let aspect = dimensions.width as f32 / dimensions.height as f32;
-                    renderer.camera.set_perspective_projection(
-                        50.0_f32.to_radians(),
-                        aspect,
-                        0.1,
-                        500.0,
-                    );
-
-                    animate_game_objects(&mut game_objects, delta_time);
-
-                    renderer.update();
                     match renderer.render(&game_objects) {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost) => renderer.resize(renderer.size),
@@ -222,74 +198,47 @@ pub async fn run() {
                 WindowEvent::KeyboardInput { event, .. } => {
                     if let PhysicalKey::Code(code) = event.physical_key {
                         match code {
-                            KeyCode::KeyA => {
-                                camera_controller.move_left = event.state == ElementState::Pressed
-                            }
-                            KeyCode::KeyD => {
-                                camera_controller.move_right = event.state == ElementState::Pressed
-                            }
-                            KeyCode::KeyW => {
-                                camera_controller.move_forward =
-                                    event.state == ElementState::Pressed
-                            }
-                            KeyCode::KeyS => {
-                                camera_controller.move_backward =
-                                    event.state == ElementState::Pressed
-                            }
-                            KeyCode::Space => {
-                                camera_controller.move_up = event.state == ElementState::Pressed
-                            }
-                            KeyCode::ShiftLeft => {
-                                camera_controller.move_down = event.state == ElementState::Pressed
-                            }
-                            KeyCode::ArrowLeft => {
-                                camera_controller.look_left = event.state == ElementState::Pressed
-                            }
-                            KeyCode::ArrowRight => {
-                                camera_controller.look_right = event.state == ElementState::Pressed
-                            }
-                            KeyCode::ArrowUp => {
-                                camera_controller.look_up = event.state == ElementState::Pressed
-                            }
-                            KeyCode::ArrowDown => {
-                                camera_controller.look_down = event.state == ElementState::Pressed
-                            }
                             KeyCode::Escape => {
-                                camera_controller.disable_mouse_engaged =
-                                    event.state == ElementState::Pressed
+                                focused = !focused;
+                                renderer.window.set_cursor_visible(!focused);
                             }
-                            _ => {}
-                        };
+                            _ => camera_controller.process_keyboard(code, event.state),
+                        }
+                        camera_controller.process_keyboard(code, event.state);
                     };
                 }
-                WindowEvent::CursorMoved { position, .. } => {
-                    camera_controller.mouse_delta = (position.x, position.y);
+                WindowEvent::MouseWheel { delta, .. } => {
+                    camera_controller.process_scroll(delta);
                 }
                 WindowEvent::MouseInput {
                     button: MouseButton::Left,
                     state,
                     ..
-                } => camera_controller.focused = state == &ElementState::Pressed,
-                WindowEvent::Focused(focused) => {
-                    camera_controller.focused = *focused;
-                }
-                WindowEvent::CursorEntered { .. } => {
-                    camera_controller.cursor_in_window = true;
-                }
-                WindowEvent::CursorLeft { .. } => {
-                    camera_controller.cursor_in_window = false;
-                }
+                } => focused = state == &ElementState::Pressed,
                 WindowEvent::Resized(physical_size) => {
                     renderer.resize(*physical_size);
                 }
                 WindowEvent::ScaleFactorChanged { .. } => {
                     renderer.resize(renderer.window.inner_size());
                 }
+                WindowEvent::Focused(focus) => {
+                    focused = *focus;
+                    renderer.window.set_cursor_visible(!focused);
+                }
+                #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::CloseRequested => {
                     elwt.exit();
                 }
                 _ => (),
             },
+            Event::DeviceEvent {
+                event: DeviceEvent::MouseMotion { delta },
+                ..
+            } => {
+                if focused {
+                    camera_controller.process_mouse(delta.0, delta.1)
+                }
+            }
             _ => (),
         })
         .unwrap();

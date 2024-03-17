@@ -35,7 +35,7 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
         |p| async move {
             let mat_text = load_string(&p)
                 .await
-                .expect(&format!("Failed to load material {:?}", p));
+                .unwrap_or_else(|_| panic!("Failed to load material {:?}", p));
             tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
         },
     )
@@ -43,8 +43,20 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
 
     let mut materials = Vec::new();
     for m in obj_materials? {
-        let diffuse_texture = load_texture(&m.diffuse_texture.unwrap(), false, &renderer.device, &renderer.queue).await?;
-        let normal_texture = load_texture(&m.normal_texture.unwrap(), true, &renderer.device, &renderer.queue).await?;
+        let diffuse_texture = load_texture(
+            &m.diffuse_texture.unwrap(),
+            false,
+            &renderer.device,
+            &renderer.queue,
+        )
+        .await?;
+        let normal_texture = load_texture(
+            &m.normal_texture.unwrap(),
+            true,
+            &renderer.device,
+            &renderer.queue,
+        )
+        .await?;
 
         materials.push(Material::new(
             &renderer.device,
@@ -127,17 +139,23 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
                 v.bitangent = (Vector3::from(v.bitangent) * denom).into();
             }
 
-            let vertex_buffer = renderer.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{:?} Vertex Buffer", file_name)),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let index_buffer = renderer.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{:?} Index Buffer", file_name)),
-                contents: bytemuck::cast_slice(&m.mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-    
+            let vertex_buffer =
+                renderer
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("{:?} Vertex Buffer", file_name)),
+                        contents: bytemuck::cast_slice(&vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+            let index_buffer =
+                renderer
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("{:?} Index Buffer", file_name)),
+                        contents: bytemuck::cast_slice(&m.mesh.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+
             Mesh {
                 name: file_name.to_string(),
                 vertex_buffer,

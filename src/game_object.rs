@@ -78,7 +78,7 @@ pub struct Transform3D {
     pub rotation: Vector3<f32>,
 }
 
-// #[allow(dead_code)]
+#[allow(dead_code)]
 #[rustfmt::skip]
 impl Transform3D {
     pub fn new() -> Self {
@@ -393,7 +393,13 @@ where
         light_bind_group: &'b wgpu::BindGroup,
     ) {
         for mesh in &model.meshes {
-            self.draw_mesh_instanced(mesh, material, instances.clone(), camera_bind_group, light_bind_group);
+            self.draw_mesh_instanced(
+                mesh,
+                material,
+                instances.clone(),
+                camera_bind_group,
+                light_bind_group,
+            );
         }
     }
 }

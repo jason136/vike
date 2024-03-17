@@ -1,14 +1,14 @@
 use anyhow::Result;
-use nalgebra::{Quaternion, UnitQuaternion, UnitVector3, Vector3, Vector4};
+use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 use std::{collections::HashMap, sync::Arc};
 use wgpu::util::DeviceExt;
 use winit::{event::WindowEvent, window::Window};
 
 use crate::{
-    camera::{Camera, CameraUniform},
+    camera::{Camera, CameraUniform, Projection},
     game_object::{
         DrawLight, DrawModel, GameObject, GameObjectType, Instance, InstanceRaw, LightUniform,
-        ModelVertex, Transform3D, Vertex,
+        ModelVertex, Vertex,
     },
     texture::Texture,
 };
@@ -32,6 +32,7 @@ pub struct Renderer {
     pub texture_bind_group_layout: wgpu::BindGroupLayout,
     pub depth_texture: Texture,
     pub camera: Camera,
+    pub projection: Projection,
     pub camera_uniform: CameraUniform,
     pub camera_buffer: wgpu::Buffer,
     pub camera_bind_group: wgpu::BindGroup,
@@ -141,12 +142,11 @@ impl Renderer {
 
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
-        let mut transform = Transform3D::new();
-        transform.translation.z = -2.5;
-        let camera = Camera::new(Some(transform));
+        let camera = Camera::new([0.0, 5.0, 10.0], -1.5708, -0.349066);
+        let projection = Projection::new(config.width, config.height, 45.0, 0.1, 100.0);
 
         let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
+        camera_uniform.update_view_proj(&camera, &projection);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -197,7 +197,10 @@ impl Renderer {
             })
             .collect::<Vec<Instance>>();
 
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<InstanceRaw>>();
+        let instance_data = instances
+            .iter()
+            .map(Instance::to_raw)
+            .collect::<Vec<InstanceRaw>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
@@ -301,6 +304,7 @@ impl Renderer {
             texture_bind_group_layout,
             depth_texture,
             camera,
+            projection,
             camera_uniform,
             camera_buffer,
             camera_bind_group,
@@ -369,6 +373,8 @@ impl Renderer {
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        self.projection.resize(new_size.width, new_size.height);
+
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
             self.config.width = new_size.width;
@@ -384,11 +390,11 @@ impl Renderer {
         false
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self, dt: instant::Duration) {
         let old_position: Vector3<f32> = self.light_uniform.position.into();
         self.light_uniform.position = (UnitQuaternion::from_axis_angle(
             &UnitVector3::new_normalize(Vector3::new(0.0, 1.0, 0.0)),
-            0.1,
+            0.1 * dt.as_secs_f32(),
         ) * old_position)
             .into();
 
@@ -398,7 +404,9 @@ impl Renderer {
             bytemuck::cast_slice(&[self.light_uniform]),
         );
 
-        self.camera_uniform.update_view_proj(&self.camera);
+        self.camera_uniform
+            .update_view_proj(&self.camera, &self.projection);
+
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -454,12 +462,11 @@ impl Renderer {
                 match &game_object.obj {
                     GameObjectType::PointLight {
                         model: Some(model),
-                        light_intensity,
-                        color,
+                        ..
                     } => {
                         render_pass.set_pipeline(&self.light_render_pipeline);
                         render_pass.draw_light_model(
-                            &model,
+                            model,
                             &self.camera_bind_group,
                             &self.light_bind_group,
                         );
@@ -467,7 +474,7 @@ impl Renderer {
                     GameObjectType::Model { model: Some(model) } => {
                         render_pass.set_pipeline(&self.render_pipeline);
                         render_pass.draw_model_instanced(
-                            &model,
+                            model,
                             0..self.instances.len() as u32,
                             &self.camera_bind_group,
                             &self.light_bind_group,
