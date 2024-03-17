@@ -11,12 +11,14 @@ pub struct Camera {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
+    view_position: [f32; 4],
     view_proj: [[f32; 4]; 4],
 }
 
 impl CameraUniform {
     pub fn new() -> Self {
         CameraUniform {
+            view_position: [0.0; 4],
             view_proj: Matrix4::identity().into(),
         }
     }
@@ -30,6 +32,12 @@ impl CameraUniform {
             0.0, 0.0, 0.0, 1.0,
         ]);
 
+        self.view_position = [
+            camera.inverse_view_matrix.m14,
+            camera.inverse_view_matrix.m24,
+            camera.inverse_view_matrix.m34,
+            1.0,
+        ];
         self.view_proj =
             (opengl_to_wgpu_matrix * camera.projection_matrix * camera.view_matrix).into();
     }

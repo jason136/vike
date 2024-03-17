@@ -6,6 +6,7 @@ mod texture;
 // mod render_systems;
 mod renderer;
 
+use game_object::GameObjectType;
 use nalgebra::{Rotation3, Vector3};
 use renderer::Renderer;
 use std::{collections::HashMap, sync::Arc, time::Instant};
@@ -53,27 +54,30 @@ async fn create_game_objects(
     // game_object.transform.scale = [3.0, 1.0, 3.0].into();
     // game_objects.insert(game_object.id, game_object);
 
-    let light_colors = [
-        Vector3::new(1.0, 0.1, 0.1),
-        Vector3::new(0.1, 0.1, 1.0),
-        Vector3::new(0.1, 1.0, 0.1),
-        Vector3::new(1.0, 1.0, 0.1),
-        Vector3::new(0.1, 1.0, 1.0),
-        Vector3::new(1.0, 1.0, 1.0),
-    ];
+    // let light_colors = [
+    //     Vector3::new(1.0, 0.1, 0.1),
+    //     Vector3::new(0.1, 0.1, 1.0),
+    //     Vector3::new(0.1, 1.0, 0.1),
+    //     Vector3::new(1.0, 1.0, 0.1),
+    //     Vector3::new(0.1, 1.0, 1.0),
+    //     Vector3::new(1.0, 1.0, 1.0),
+    // ];
 
-    for i in 0..light_colors.len() {
-        let mut point_light = GameObject::new_point_light(0.5, 0.1, light_colors[i]);
+    let point_light = GameObject::new_point_light(Some(cube_model.clone()));
+    game_objects.insert(point_light.id, point_light);
 
-        let rotation = Rotation3::from_axis_angle(
-            &Vector3::y_axis(),
-            i as f32 * std::f32::consts::PI * 2.0 / light_colors.len() as f32,
-        );
+    // for i in 0..light_colors.len() {
+    //     let mut point_light = GameObject::new_point_light(0.5, 0.1, light_colors[i]);
 
-        point_light.transform.translation = rotation * Vector3::new(-1.0, -1.0, -1.0);
+    //     let rotation = Rotation3::from_axis_angle(
+    //         &Vector3::y_axis(),
+    //         i as f32 * std::f32::consts::PI * 2.0 / light_colors.len() as f32,
+    //     );
 
-        game_objects.insert(point_light.id, point_light);
-    }
+    //     point_light.transform.translation = rotation * Vector3::new(-1.0, -1.0, -1.0);
+
+    //     game_objects.insert(point_light.id, point_light);
+    // }
 
     // for i in 0..1000 {
     //     let mut game_object = GameObject::new(Some(basemesh_model.clone()));
@@ -96,16 +100,17 @@ async fn create_game_objects(
 
 fn animate_game_objects(game_objects: &mut HashMap<u32, GameObject>, dt: f32) {
     for obj in game_objects.values_mut() {
-        if obj.point_light.is_some() {
-            let rotation = Rotation3::from_axis_angle(&Vector3::y_axis(), dt);
+        match obj.obj {
+            GameObjectType::PointLight { .. } => {
+                let rotation = Rotation3::from_axis_angle(&Vector3::y_axis(), dt);
+                obj.transform.translation = rotation * obj.transform.translation;
+            }
+            GameObjectType::Model { .. } => {
+                let rotation = Rotation3::from_axis_angle(&Vector3::y_axis(), dt * 0.01);
 
-            obj.transform.translation = rotation * obj.transform.translation;
-        } else if obj.id > 2 {
-            let rotation = Rotation3::from_axis_angle(&Vector3::y_axis(), dt * 0.01);
-
-            obj.transform.translation = rotation * obj.transform.translation;
-            obj.transform.rotation.y += dt * 0.1;
-            // obj.transform.translation.y += dt * 0.01;
+                obj.transform.translation = rotation * obj.transform.translation;
+                obj.transform.rotation.y += dt * 0.1;
+            }
         }
     }
 
@@ -162,9 +167,6 @@ pub async fn run() {
 
     let mut current_time = Instant::now();
 
-    // let mut frames: Vec<f32> = vec![];
-    // let mut frame_count = 0;
-
     event_loop
         .run(move |event, elwt| match event {
             Event::AboutToWait => {
@@ -178,6 +180,8 @@ pub async fn run() {
                     let new_time = Instant::now();
                     let delta_time = new_time.duration_since(current_time).as_secs_f32();
                     current_time = new_time;
+
+                    println!("FPS: {}", 1.0 / delta_time);
 
                     let dimensions = renderer.size;
                     camera_controller

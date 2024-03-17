@@ -62,10 +62,10 @@ impl KeyboardController {
             rotate.y -= 1.0;
         }
         if self.look_up {
-            rotate.x += 1.0;
+            rotate.x -= 1.0;
         }
         if self.look_down {
-            rotate.x -= 1.0;
+            rotate.x += 1.0;
         }
 
         if self.focused != self.focused_previous {
@@ -108,10 +108,10 @@ impl KeyboardController {
             move_direction += right_direction;
         }
         if self.move_up {
-            move_direction += up_direction;
+            move_direction -= up_direction;
         }
         if self.move_down {
-            move_direction -= up_direction;
+            move_direction += up_direction;
         }
 
         if move_direction.dot(&move_direction) > 0.0 {
