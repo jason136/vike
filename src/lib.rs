@@ -1,8 +1,8 @@
 mod camera;
 mod game_object;
+mod renderer;
 mod resources;
 mod texture;
-mod renderer;
 
 use game_object::GameObjectType;
 use instant::Duration;
@@ -162,7 +162,7 @@ pub async fn run() {
 
     let (mut game_objects, _models) = create_game_objects(&renderer).await;
 
-    let mut camera_controller = CameraController::new(4.0, 0.4);
+    let mut camera_controller = CameraController::new(4.0, 0.6);
     let mut focused = true;
 
     let mut last_render_time = instant::Instant::now();
@@ -180,9 +180,6 @@ pub async fn run() {
                     let now = instant::Instant::now();
                     let dt = now - last_render_time;
                     last_render_time = now;
-
-                    // println!("FPS: {}", 1.0 / dt.as_secs_f32());
-                    println!("Camera: {:?}", renderer.camera);
 
                     animate_game_objects(&mut game_objects, dt);
                     camera_controller.update_camera(&mut renderer.camera, dt);

@@ -14,11 +14,6 @@ use crate::{
 };
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
-const INSTANCE_DISPLACEMENT: Vector3<f32> = Vector3::new(
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-    0.0,
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-);
 
 pub struct Renderer {
     pub window: Arc<Window>,
@@ -142,8 +137,18 @@ impl Renderer {
 
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
-        let camera = Camera::new([0.0, 5.0, 10.0], -1.5708, -0.349066);
-        let projection = Projection::new(config.width, config.height, 45.0, 0.1, 100.0);
+        let camera = Camera::new(
+            [0.0, 5.0, -10.0],
+            -90.0_f32.to_radians(),
+            20.0_f32.to_radians(),
+        );
+        let projection = Projection::new(
+            config.width,
+            config.height,
+            45.0_f32.to_radians(),
+            0.1,
+            100.0,
+        );
 
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
@@ -184,7 +189,7 @@ impl Renderer {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
                     let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
                     let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let position = Vector3::new(x, 0.0, z) - INSTANCE_DISPLACEMENT;
+                    let position = Vector3::new(x, 0.0, z);
 
                     let rotation = if position == Vector3::zeros() {
                         UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 0.0)
@@ -461,8 +466,7 @@ impl Renderer {
             for game_object in game_objects.values() {
                 match &game_object.obj {
                     GameObjectType::PointLight {
-                        model: Some(model),
-                        ..
+                        model: Some(model), ..
                     } => {
                         render_pass.set_pipeline(&self.light_render_pipeline);
                         render_pass.draw_light_model(
