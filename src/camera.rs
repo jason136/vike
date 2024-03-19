@@ -1,6 +1,6 @@
+use glam::{Mat4, Vec3};
 use std::f32::consts::FRAC_PI_2;
 use std::time::Duration;
-use glam::{Mat4, Vec3};
 use winit::dpi::PhysicalPosition;
 use winit::event::*;
 use winit::keyboard::KeyCode;
@@ -59,7 +59,7 @@ impl Projection {
     }
 
     pub fn calc_matrix(&self) -> Mat4 {
-        Mat4::perspective_lh(self.fovy, self.aspect, self.znear, self.zfar)
+        Mat4::perspective_rh(self.fovy, self.aspect, self.znear, self.zfar)
     }
 }
 
@@ -142,19 +142,18 @@ impl CameraController {
         let (yaw_sin, yaw_cos) = camera.yaw.sin_cos();
         let forward = Vec3::new(yaw_cos, 0.0, yaw_sin).normalize();
         let right = Vec3::new(-yaw_sin, 0.0, yaw_cos).normalize();
-        camera.position -= forward * (self.amount_forward - self.amount_backward) * self.speed * dt;
+        camera.position += forward * (self.amount_forward - self.amount_backward) * self.speed * dt;
         camera.position += right * (self.amount_right - self.amount_left) * self.speed * dt;
 
         let (pitch_sin, pitch_cos) = camera.pitch.sin_cos();
-        let scrollward =
-        Vec3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
+        let scrollward = Vec3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
         camera.position += scrollward * self.scroll * self.speed * self.sensitivity * dt;
         self.scroll = 0.0;
 
         camera.position.y += (self.amount_up - self.amount_down) * self.speed * dt;
 
-        camera.yaw -= self.rotate_horizontal * self.sensitivity * dt;
-        camera.pitch += self.rotate_vertical * self.sensitivity * dt;
+        camera.yaw += self.rotate_horizontal * self.sensitivity * dt;
+        camera.pitch -= self.rotate_vertical * self.sensitivity * dt;
 
         self.rotate_horizontal = 0.0;
         self.rotate_vertical = 0.0;

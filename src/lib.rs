@@ -1,17 +1,17 @@
 mod camera;
+mod debug;
 mod game_object;
-mod renderer;
 mod hdr;
+mod renderer;
 mod resources;
 mod texture;
-mod debug;
 
 use game_object::GameObjectType;
 use glam::{Mat3, Vec3};
 use instant::Duration;
 use renderer::Renderer;
 use std::{collections::HashMap, sync::Arc};
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{DeviceEvent, MouseButton};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::{
@@ -166,6 +166,7 @@ pub async fn run() {
 
     let mut camera_controller = CameraController::new(4.0, 0.6);
     let mut focused = true;
+    let mut cursor_reset = false;
 
     let mut last_render_time = instant::Instant::now();
 
@@ -189,7 +190,9 @@ pub async fn run() {
 
                     match renderer.render(&game_objects) {
                         Ok(_) => {}
-                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => renderer.resize(renderer.size),
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            renderer.resize(renderer.size)
+                        }
                         Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
                         Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
                     }
@@ -235,7 +238,20 @@ pub async fn run() {
                 ..
             } => {
                 if focused {
-                    camera_controller.process_mouse(delta.0, delta.1)
+                    if cursor_reset {
+                        cursor_reset = false;
+                    } else {
+                        camera_controller.process_mouse(delta.0, delta.1);
+                        let dimensions = renderer.window.inner_size();
+                        renderer
+                            .window
+                            .set_cursor_position(PhysicalPosition::new(
+                                dimensions.width / 2,
+                                dimensions.height / 2,
+                            ))
+                            .unwrap();
+                        cursor_reset = true;    
+                    }
                 }
             }
             _ => (),

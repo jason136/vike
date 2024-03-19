@@ -5,10 +5,14 @@ use wgpu::util::DeviceExt;
 use winit::{event::WindowEvent, window::Window};
 
 use crate::{
-    camera::{Camera, CameraUniform, Projection}, debug::Debug, game_object::{
+    camera::{Camera, CameraUniform, Projection},
+    debug::Debug,
+    game_object::{
         DrawLight, DrawModel, GameObject, GameObjectType, Instance, InstanceRaw, LightUniform,
         ModelVertex, Vertex,
-    }, hdr::HdrPipeline, texture::Texture
+    },
+    hdr::HdrPipeline,
+    texture::Texture,
 };
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
@@ -24,7 +28,7 @@ pub struct Renderer {
     pub light_render_pipeline: wgpu::RenderPipeline,
     pub texture_bind_group_layout: wgpu::BindGroupLayout,
     pub depth_texture: Texture,
-    // pub hdr: HdrPipeline,
+    pub hdr: HdrPipeline,
     pub camera: Camera,
     pub projection: Projection,
     pub camera_uniform: CameraUniform,
@@ -137,12 +141,12 @@ impl Renderer {
 
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
-        // let hdr = HdrPipeline::new(&device, &config);
+        let hdr = HdrPipeline::new(&device, &config);
 
         let camera = Camera::new(
-            [0.0, 5.0, -10.0],
+            [0.0, 5.0, 10.0],
             -90.0_f32.to_radians(),
-            20.0_f32.to_radians(),
+            -20.0_f32.to_radians(),
         );
         let projection = Projection::new(
             config.width,
@@ -270,8 +274,7 @@ impl Renderer {
             Self::create_render_pipeline(
                 &device,
                 &layout,
-                // hdr.format,
-                config.format,
+                hdr.format,
                 Some(Texture::DEPTH_FORMAT),
                 &[ModelVertex::desc(), InstanceRaw::desc()],
                 wgpu::PrimitiveTopology::TriangleList,
@@ -294,8 +297,7 @@ impl Renderer {
             Self::create_render_pipeline(
                 &device,
                 &layout,
-                // hdr.format,
-                config.format,
+                hdr.format,
                 Some(Texture::DEPTH_FORMAT),
                 &[ModelVertex::desc()],
                 wgpu::PrimitiveTopology::TriangleList,
@@ -316,7 +318,7 @@ impl Renderer {
             light_render_pipeline,
             texture_bind_group_layout,
             depth_texture,
-            // hdr,
+            hdr,
             camera,
             projection,
             camera_uniform,
@@ -363,7 +365,7 @@ impl Renderer {
             primitive: wgpu::PrimitiveState {
                 topology,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Cw,
+                front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
@@ -388,7 +390,8 @@ impl Renderer {
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.projection.resize(new_size.width, new_size.height);
-            // self.hdr.resize(&self.device, new_size.width, new_size.height);
+            self.hdr
+                .resize(&self.device, new_size.width, new_size.height);
 
             self.size = new_size;
             self.config.width = new_size.width;
@@ -406,11 +409,8 @@ impl Renderer {
 
     pub fn update(&mut self, dt: instant::Duration) {
         let old_position: Vec3 = self.light_uniform.position.into();
-        self.light_uniform.position = (Quat::from_axis_angle(
-            Vec3::Y,
-            0.1 * dt.as_secs_f32(),
-        ) * old_position)
-            .into();
+        self.light_uniform.position =
+            (Quat::from_axis_angle(Vec3::Y, dt.as_secs_f32()) * old_position).into();
 
         self.queue.write_buffer(
             &self.light_buffer,
@@ -447,8 +447,7 @@ impl Renderer {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    // view: &self.hdr.texture.view,
-                    view: &view,
+                    view: &self.hdr.texture.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -500,7 +499,7 @@ impl Renderer {
             }
         }
 
-        // self.hdr.process(&mut encoder, &view);
+        self.hdr.process(&mut encoder, &view);
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

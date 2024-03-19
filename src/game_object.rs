@@ -286,6 +286,7 @@ impl Material {
     }
 }
 
+#[allow(dead_code)]
 pub trait DrawModel<'a> {
     fn draw_mesh(
         &mut self,
@@ -404,6 +405,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 pub trait DrawLight<'a> {
     fn draw_light_mesh(
         &mut self,

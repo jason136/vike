@@ -1,5 +1,3 @@
-use std::mem::size_of;
-
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 
 use crate::renderer::Renderer;
@@ -11,8 +9,7 @@ pub struct PositionColor {
     color: [f32; 3],
 }
 
-const AXIS_COLORS: &'static [PositionColor] = &[
-    // X
+const AXIS_COLORS: &[PositionColor] = &[
     PositionColor {
         position: [0.0, 0.0, 0.0],
         color: [0.5, 0.0, 0.0],
@@ -21,7 +18,6 @@ const AXIS_COLORS: &'static [PositionColor] = &[
         position: [1.0, 0.0, 0.0],
         color: [1.0, 0.0, 0.0],
     },
-    // Y
     PositionColor {
         position: [0.0, 0.0, 0.0],
         color: [0.0, 0.5, 0.0],
@@ -30,7 +26,6 @@ const AXIS_COLORS: &'static [PositionColor] = &[
         position: [0.0, 1.0, 0.0],
         color: [0.0, 1.0, 0.0],
     },
-    // Z
     PositionColor {
         position: [0.0, 0.0, 0.0],
         color: [0.0, 0.0, 0.5],
@@ -42,7 +37,7 @@ const AXIS_COLORS: &'static [PositionColor] = &[
 ];
 
 const POSITION_COLOR_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
-    array_stride: size_of::<PositionColor>() as _,
+    array_stride: std::mem::size_of::<PositionColor>() as _,
     step_mode: wgpu::VertexStepMode::Vertex,
     attributes: &wgpu::vertex_attr_array![
         0 => Float32x3,
@@ -62,7 +57,7 @@ impl Debug {
         color_format: wgpu::TextureFormat,
     ) -> Self {
         let axis = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("Debug::axis"),
+            label: Some("debug_axis"),
             contents: bytemuck::cast_slice(AXIS_COLORS),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::VERTEX,
         });

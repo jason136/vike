@@ -123,7 +123,7 @@ impl HdrPipeline {
     pub fn process(&self, encoder: &mut wgpu::CommandEncoder, output: &wgpu::TextureView) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &output,
+                view: output,
                 resolve_target: None,
                 ops: Operations {
                     load: wgpu::LoadOp::Load,
