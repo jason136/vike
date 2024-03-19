@@ -5,12 +5,10 @@ use wgpu::util::DeviceExt;
 use winit::{event::WindowEvent, window::Window};
 
 use crate::{
-    camera::{Camera, CameraUniform, Projection},
-    game_object::{
+    camera::{Camera, CameraUniform, Projection}, debug::Debug, game_object::{
         DrawLight, DrawModel, GameObject, GameObjectType, Instance, InstanceRaw, LightUniform,
         ModelVertex, Vertex,
-    },
-    texture::Texture,
+    }, hdr::HdrPipeline, texture::Texture
 };
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
@@ -26,6 +24,7 @@ pub struct Renderer {
     pub light_render_pipeline: wgpu::RenderPipeline,
     pub texture_bind_group_layout: wgpu::BindGroupLayout,
     pub depth_texture: Texture,
+    // pub hdr: HdrPipeline,
     pub camera: Camera,
     pub projection: Projection,
     pub camera_uniform: CameraUniform,
@@ -37,6 +36,7 @@ pub struct Renderer {
     pub light_buffer: wgpu::Buffer,
     pub light_bind_group_layout: wgpu::BindGroupLayout,
     pub light_bind_group: wgpu::BindGroup,
+    pub debug: Debug,
 }
 
 impl Renderer {
@@ -136,6 +136,8 @@ impl Renderer {
             });
 
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
+
+        // let hdr = HdrPipeline::new(&device, &config);
 
         let camera = Camera::new(
             [0.0, 5.0, -10.0],
@@ -237,7 +239,7 @@ impl Renderer {
                     },
                     count: None,
                 }],
-                label: None,
+                label: Some("light_bind_group_layout"),
             });
 
         let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -246,7 +248,7 @@ impl Renderer {
                 binding: 0,
                 resource: light_buffer.as_entire_binding(),
             }],
-            label: None,
+            label: Some("light_bind_group"),
         });
 
         let render_pipeline = {
@@ -268,9 +270,11 @@ impl Renderer {
             Self::create_render_pipeline(
                 &device,
                 &layout,
+                // hdr.format,
                 config.format,
                 Some(Texture::DEPTH_FORMAT),
                 &[ModelVertex::desc(), InstanceRaw::desc()],
+                wgpu::PrimitiveTopology::TriangleList,
                 shader,
             )
         };
@@ -290,12 +294,16 @@ impl Renderer {
             Self::create_render_pipeline(
                 &device,
                 &layout,
+                // hdr.format,
                 config.format,
                 Some(Texture::DEPTH_FORMAT),
                 &[ModelVertex::desc()],
+                wgpu::PrimitiveTopology::TriangleList,
                 shader,
             )
         };
+
+        let debug = Debug::new(&device, &camera_bind_group_layout, surface_format);
 
         Self {
             window: window_arc,
@@ -308,6 +316,7 @@ impl Renderer {
             light_render_pipeline,
             texture_bind_group_layout,
             depth_texture,
+            // hdr,
             camera,
             projection,
             camera_uniform,
@@ -319,15 +328,17 @@ impl Renderer {
             light_buffer,
             light_bind_group_layout,
             light_bind_group,
+            debug,
         }
     }
 
-    fn create_render_pipeline(
+    pub fn create_render_pipeline(
         device: &wgpu::Device,
         layout: &wgpu::PipelineLayout,
         color_format: wgpu::TextureFormat,
         depth_format: Option<wgpu::TextureFormat>,
         vertex_layouts: &[wgpu::VertexBufferLayout],
+        topology: wgpu::PrimitiveTopology,
         shader: wgpu::ShaderModuleDescriptor,
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(shader);
@@ -345,15 +356,12 @@ impl Renderer {
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: color_format,
-                    blend: Some(wgpu::BlendState {
-                        alpha: wgpu::BlendComponent::REPLACE,
-                        color: wgpu::BlendComponent::REPLACE,
-                    }),
+                    blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
+                topology,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Cw,
                 cull_mode: Some(wgpu::Face::Back),
@@ -364,7 +372,7 @@ impl Renderer {
             depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
                 format,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_compare: wgpu::CompareFunction::LessEqual,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -378,17 +386,18 @@ impl Renderer {
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        self.projection.resize(new_size.width, new_size.height);
-
         if new_size.width > 0 && new_size.height > 0 {
+            self.projection.resize(new_size.width, new_size.height);
+            // self.hdr.resize(&self.device, new_size.width, new_size.height);
+
             self.size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
-        }
 
-        self.depth_texture =
-            Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+            self.depth_texture =
+                Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+        }
     }
 
     pub fn input(&mut self, _event: &WindowEvent) -> bool {
@@ -427,6 +436,7 @@ impl Renderer {
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -437,6 +447,7 @@ impl Renderer {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    // view: &self.hdr.texture.view,
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -487,6 +498,26 @@ impl Renderer {
                     _ => {}
                 }
             }
+        }
+
+        // self.hdr.process(&mut encoder, &view);
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Debug"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            self.debug.draw_axis(&mut pass, &self.camera_bind_group);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

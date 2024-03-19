@@ -1,8 +1,10 @@
 mod camera;
 mod game_object;
 mod renderer;
+mod hdr;
 mod resources;
 mod texture;
+mod debug;
 
 use game_object::GameObjectType;
 use instant::Duration;
@@ -187,9 +189,9 @@ pub async fn run() {
 
                     match renderer.render(&game_objects) {
                         Ok(_) => {}
-                        Err(wgpu::SurfaceError::Lost) => renderer.resize(renderer.size),
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => renderer.resize(renderer.size),
                         Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
-                        Err(e) => eprintln!("{:?}", e),
+                        Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } => {

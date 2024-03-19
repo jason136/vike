@@ -59,15 +59,7 @@ impl Projection {
     }
 
     pub fn calc_matrix(&self) -> Matrix4<f32> {
-        #[rustfmt::skip]
-        let opengl_to_wgpu_matrix = Matrix4::from_column_slice(&[
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 0.5, 0.5,
-            0.0, 0.0, 0.0, 1.0,
-        ]);
-
-        opengl_to_wgpu_matrix * perspective(self.fovy, self.aspect, self.znear, self.zfar)
+        perspective(self.fovy, self.aspect, self.znear, self.zfar)
     }
 }
 
@@ -179,20 +171,32 @@ impl CameraController {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     view_position: [f32; 4],
+    view: [[f32; 4]; 4],
     view_proj: [[f32; 4]; 4],
+    inv_proj: [[f32; 4]; 4],
+    inv_view: [[f32; 4]; 4],
 }
 
 impl CameraUniform {
     pub fn new() -> Self {
         Self {
             view_position: [0.0; 4],
+            view: Matrix4::identity().into(),
             view_proj: Matrix4::identity().into(),
+            inv_proj: Matrix4::identity().into(),
+            inv_view: Matrix4::identity().into(),
         }
     }
 
     pub fn update_view_proj(&mut self, camera: &Camera, projection: &Projection) {
         self.view_position = camera.position.to_homogeneous().into();
-        self.view_proj = (projection.calc_matrix() * camera.calc_matrix()).into();
+        let proj = projection.calc_matrix();
+        let view = camera.calc_matrix();
+        let view_proj = proj * view;
+        self.view = view.into();
+        self.view_proj = view_proj.into();
+        self.inv_proj = proj.try_inverse().unwrap().into();
+        self.inv_view = view.transpose().into();
     }
 }
 
