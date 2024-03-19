@@ -1,7 +1,7 @@
 use crate::texture::Texture;
 
 use bytemuck::{Pod, Zeroable};
-use nalgebra::{Matrix4, UnitQuaternion, Vector3};
+use glam::{Mat3, Mat4, Quat, Vec3};
 use std::ops::Range;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -73,9 +73,9 @@ impl Vertex for ModelVertex {
 
 #[derive(Clone)]
 pub struct Transform3D {
-    pub translation: Vector3<f32>,
-    pub scale: Vector3<f32>,
-    pub rotation: Vector3<f32>,
+    pub translation: Vec3,
+    pub scale: Vec3,
+    pub rotation: Vec3,
 }
 
 #[allow(dead_code)]
@@ -83,13 +83,13 @@ pub struct Transform3D {
 impl Transform3D {
     pub fn new() -> Self {
         Transform3D {
-            translation: Vector3::new(0.0, 0.0, 0.0),
-            scale: Vector3::new(1.0, 1.0, 1.0),
-            rotation: Vector3::new(0.0, 0.0, 0.0),
+            translation: Vec3::new(0.0, 0.0, 0.0),
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: Vec3::new(0.0, 0.0, 0.0),
         }
     }
 
-    pub fn mat4(&self) -> Matrix4<f32> {
+    pub fn mat4(&self) -> Mat4 {
         let c3 = self.rotation.z.cos();
         let s3 = self.rotation.z.sin();
         let c2 = self.rotation.x.cos();
@@ -97,7 +97,7 @@ impl Transform3D {
         let c1 = self.rotation.y.cos();
         let s1 = self.rotation.y.sin();
 
-        Matrix4::from_column_slice(&[
+        Mat4::from_cols_array(&[
             self.scale.x * (c1 * c3 + s1 * s2 * s3),
             self.scale.x * (c2 * s3),
             self.scale.x * (c1 * s2 * s3 - c3 * s1),
@@ -120,16 +120,16 @@ impl Transform3D {
         ])
     }
 
-    pub fn normal_matrix(&self) -> Matrix4<f32> {
+    pub fn normal_matrix(&self) -> Mat4 {
         let c3 = self.rotation.z.cos();
         let s3 = self.rotation.z.sin();
         let c2 = self.rotation.x.cos();
         let s2 = self.rotation.x.sin();
         let c1 = self.rotation.y.cos();
         let s1 = self.rotation.y.sin();
-        let inv_scale = Vector3::new(1.0 / self.scale.x, 1.0 / self.scale.y, 1.0 / self.scale.z);
+        let inv_scale = Vec3::new(1.0 / self.scale.x, 1.0 / self.scale.y, 1.0 / self.scale.z);
 
-        Matrix4::from_column_slice(&[
+        Mat4::from_cols_array(&[
             inv_scale.x * (c1 * c3 + s1 * s2 * s3),
             inv_scale.x * (c2 * s3),
             inv_scale.x * (c1 * s2 * s3 - c3 * s1),
@@ -169,7 +169,7 @@ pub enum GameObjectType {
     PointLight {
         model: Option<Arc<Model>>,
         light_intensity: f32,
-        color: Vector3<f32>,
+        color: Vec3,
     },
 }
 
@@ -186,9 +186,9 @@ impl GameObject {
         GAME_OBJECT_COUNT.fetch_add(1, Ordering::SeqCst);
 
         let transform = Transform3D {
-            translation: Vector3::new(0.0, 0.0, 0.0),
-            scale: Vector3::new(1.0, 1.0, 1.0),
-            rotation: Vector3::new(0.0, 0.0, 0.0),
+            translation: Vec3::new(0.0, 0.0, 0.0),
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: Vec3::new(0.0, 0.0, 0.0),
         };
 
         GameObject {
@@ -203,15 +203,15 @@ impl GameObject {
         GAME_OBJECT_COUNT.fetch_add(1, Ordering::SeqCst);
 
         // let transform = Transform3D {
-        //     translation: Vector3::new(0.0, 0.0, 0.0),
-        //     scale: Vector3::new(radius, 1.0, 1.0),
-        //     rotation: Vector3::new(0.0, 0.0, 0.0),
+        //     translation: Vec3::new(0.0, 0.0, 0.0),
+        //     scale: Vec3::new(radius, 1.0, 1.0),
+        //     rotation: Vec3::new(0.0, 0.0, 0.0),
         // };
 
         let transform = Transform3D {
-            translation: Vector3::new(0.0, 0.0, 0.0),
-            scale: Vector3::new(1.0, 1.0, 1.0),
-            rotation: Vector3::new(0.0, 0.0, 0.0),
+            translation: Vec3::new(0.0, 0.0, 0.0),
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: Vec3::new(0.0, 0.0, 0.0),
         };
 
         GameObject {
@@ -220,7 +220,7 @@ impl GameObject {
             obj: GameObjectType::PointLight {
                 model,
                 light_intensity: 1.0,
-                color: Vector3::new(1.0, 1.0, 1.0),
+                color: Vec3::new(1.0, 1.0, 1.0),
             },
         }
     }
@@ -488,8 +488,8 @@ where
 }
 
 pub struct Instance {
-    pub position: Vector3<f32>,
-    pub rotation: UnitQuaternion<f32>,
+    pub position: Vec3,
+    pub rotation: Quat,
 }
 
 #[repr(C)]
@@ -501,10 +501,10 @@ pub struct InstanceRaw {
 
 impl Instance {
     pub fn to_raw(&self) -> InstanceRaw {
-        let model = Matrix4::new_translation(&self.position) * Matrix4::from(self.rotation);
+        let model = Mat4::from_translation(self.position) * Mat4::from_quat(self.rotation);
         InstanceRaw {
-            model: model.into(),
-            normal: (*self.rotation.to_rotation_matrix().matrix()).into(),
+            model: model.to_cols_array_2d(),
+            normal: Mat3::from_quat(self.rotation).to_cols_array_2d(),
         }
     }
 }

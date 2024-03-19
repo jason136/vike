@@ -7,8 +7,8 @@ mod texture;
 mod debug;
 
 use game_object::GameObjectType;
+use glam::{Mat3, Vec3};
 use instant::Duration;
-use nalgebra::{Rotation3, Vector3};
 use renderer::Renderer;
 use std::{collections::HashMap, sync::Arc};
 use winit::dpi::LogicalSize;
@@ -103,11 +103,11 @@ fn animate_game_objects(game_objects: &mut HashMap<u32, GameObject>, dt: Duratio
     for obj in game_objects.values_mut() {
         match obj.obj {
             GameObjectType::PointLight { .. } => {
-                let rotation = Rotation3::from_axis_angle(&Vector3::y_axis(), dt_secs);
+                let rotation = Mat3::from_axis_angle(Vec3::Y, dt_secs);
                 obj.transform.translation = rotation * obj.transform.translation;
             }
             GameObjectType::Model { .. } => {
-                let rotation = Rotation3::from_axis_angle(&Vector3::y_axis(), dt_secs * 0.01);
+                let rotation = Mat3::from_axis_angle(Vec3::Y, dt_secs * 0.01);
 
                 obj.transform.translation = rotation * obj.transform.translation;
                 obj.transform.rotation.y += dt_secs * 0.1;

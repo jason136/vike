@@ -1,6 +1,6 @@
-use nalgebra::{Matrix4, Point3, Vector3};
 use std::f32::consts::FRAC_PI_2;
 use std::time::Duration;
+use glam::{Mat4, Vec3};
 use winit::dpi::PhysicalPosition;
 use winit::event::*;
 use winit::keyboard::KeyCode;
@@ -9,13 +9,13 @@ const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 
 #[derive(Debug)]
 pub struct Camera {
-    pub position: Point3<f32>,
+    pub position: Vec3,
     yaw: f32,
     pitch: f32,
 }
 
 impl Camera {
-    pub fn new<V: Into<Point3<f32>>>(position: V, yaw: f32, pitch: f32) -> Self {
+    pub fn new<V: Into<Vec3>>(position: V, yaw: f32, pitch: f32) -> Self {
         Self {
             position: position.into(),
             yaw,
@@ -23,15 +23,15 @@ impl Camera {
         }
     }
 
-    pub fn calc_matrix(&self) -> Matrix4<f32> {
+    pub fn calc_matrix(&self) -> Mat4 {
         let (sin_pitch, cos_pitch) = self.pitch.sin_cos();
         let (sin_yaw, cos_yaw) = self.yaw.sin_cos();
 
-        Matrix4::look_at_rh(
-            &self.position,
-            &(self.position
-                + Vector3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize()),
-            &Vector3::y(),
+        Mat4::look_at_rh(
+            self.position,
+            self.position
+                + Vec3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize(),
+            Vec3::Y,
         )
     }
 }
@@ -58,8 +58,8 @@ impl Projection {
         self.aspect = width as f32 / height as f32;
     }
 
-    pub fn calc_matrix(&self) -> Matrix4<f32> {
-        perspective(self.fovy, self.aspect, self.znear, self.zfar)
+    pub fn calc_matrix(&self) -> Mat4 {
+        Mat4::perspective_lh(self.fovy, self.aspect, self.znear, self.zfar)
     }
 }
 
@@ -140,14 +140,14 @@ impl CameraController {
         let dt = dt.as_secs_f32();
 
         let (yaw_sin, yaw_cos) = camera.yaw.sin_cos();
-        let forward = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
-        let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
+        let forward = Vec3::new(yaw_cos, 0.0, yaw_sin).normalize();
+        let right = Vec3::new(-yaw_sin, 0.0, yaw_cos).normalize();
         camera.position -= forward * (self.amount_forward - self.amount_backward) * self.speed * dt;
         camera.position += right * (self.amount_right - self.amount_left) * self.speed * dt;
 
         let (pitch_sin, pitch_cos) = camera.pitch.sin_cos();
         let scrollward =
-            Vector3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
+        Vec3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
         camera.position += scrollward * self.scroll * self.speed * self.sensitivity * dt;
         self.scroll = 0.0;
 
@@ -181,57 +181,21 @@ impl CameraUniform {
     pub fn new() -> Self {
         Self {
             view_position: [0.0; 4],
-            view: Matrix4::identity().into(),
-            view_proj: Matrix4::identity().into(),
-            inv_proj: Matrix4::identity().into(),
-            inv_view: Matrix4::identity().into(),
+            view: Mat4::IDENTITY.to_cols_array_2d(),
+            view_proj: Mat4::IDENTITY.to_cols_array_2d(),
+            inv_proj: Mat4::IDENTITY.to_cols_array_2d(),
+            inv_view: Mat4::IDENTITY.to_cols_array_2d(),
         }
     }
 
     pub fn update_view_proj(&mut self, camera: &Camera, projection: &Projection) {
-        self.view_position = camera.position.to_homogeneous().into();
+        self.view_position = camera.position.extend(1.0).into();
         let proj = projection.calc_matrix();
         let view = camera.calc_matrix();
         let view_proj = proj * view;
-        self.view = view.into();
-        self.view_proj = view_proj.into();
-        self.inv_proj = proj.try_inverse().unwrap().into();
-        self.inv_view = view.transpose().into();
+        self.view = view.to_cols_array_2d();
+        self.view_proj = view_proj.to_cols_array_2d();
+        self.inv_proj = proj.inverse().to_cols_array_2d();
+        self.inv_view = view.transpose().to_cols_array_2d();
     }
-}
-
-#[allow(dead_code)]
-#[rustfmt::skip]
-pub fn perspective(fovy: f32, aspect: f32, near: f32, far: f32) -> Matrix4<f32> {
-    let tan_half_fovy = (fovy / 2.0).tan();
-    Matrix4::from_column_slice(&[
-        1.0 / (aspect * tan_half_fovy), 0.0, 0.0, 0.0,
-
-        0.0, 1.0 / (tan_half_fovy), 0.0, 0.0,
-
-        0.0, 0.0, far / (far - near), 1.0, 
-
-        0.0, 0.0, -(far * near) / (far - near), 0.0,
-    ])
-}
-
-#[allow(dead_code)]
-#[rustfmt::skip]
-pub fn orthographic(
-    left: f32, right: f32,
-    top: f32, bottom: f32,
-    near: f32, far: f32,
-) -> Matrix4<f32> {
-    Matrix4::from_column_slice(&[
-        2.0 / (right - left), 0.0, 0.0, 0.0,
-
-        0.0, 2.0 / (bottom - top), 0.0, 0.0,
-
-        0.0, 0.0, 1.0 / (far - near), 0.0,
-
-        -(right + left) / (right - left), 
-        -(bottom + top) / (bottom - top), 
-        -near / (far - near), 
-        1.0,
-    ])
 }

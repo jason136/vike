@@ -1,6 +1,6 @@
 use anyhow::*;
 use cfg_if::cfg_if;
-use nalgebra::{Vector2, Vector3};
+use glam::{Vec2, Vec3};
 use std::io::{BufReader, Cursor};
 use wgpu::util::DeviceExt;
 
@@ -96,13 +96,13 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
                 let v1 = vertices[c[1] as usize];
                 let v2 = vertices[c[2] as usize];
 
-                let pos0: Vector3<f32> = v0.position.into();
-                let pos1: Vector3<f32> = v1.position.into();
-                let pos2: Vector3<f32> = v2.position.into();
+                let pos0: Vec3 = v0.position.into();
+                let pos1: Vec3 = v1.position.into();
+                let pos2: Vec3 = v2.position.into();
 
-                let uv0: Vector2<f32> = v0.tex_coords.into();
-                let uv1: Vector2<f32> = v1.tex_coords.into();
-                let uv2: Vector2<f32> = v2.tex_coords.into();
+                let uv0: Vec2 = v0.tex_coords.into();
+                let uv1: Vec2 = v1.tex_coords.into();
+                let uv2: Vec2 = v2.tex_coords.into();
 
                 let delta_pos1 = pos1 - pos0;
                 let delta_pos2 = pos2 - pos0;
@@ -115,17 +115,17 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
                 let bitangent = (delta_pos2 * delta_uv1.x - delta_pos1 * delta_uv2.x) * -r;
 
                 vertices[c[0] as usize].tangent =
-                    (tangent + Vector3::from(vertices[c[0] as usize].tangent)).into();
+                    (tangent + Vec3::from(vertices[c[0] as usize].tangent)).into();
                 vertices[c[1] as usize].tangent =
-                    (tangent + Vector3::from(vertices[c[1] as usize].tangent)).into();
+                    (tangent + Vec3::from(vertices[c[1] as usize].tangent)).into();
                 vertices[c[2] as usize].tangent =
-                    (tangent + Vector3::from(vertices[c[2] as usize].tangent)).into();
+                    (tangent + Vec3::from(vertices[c[2] as usize].tangent)).into();
                 vertices[c[0] as usize].bitangent =
-                    (bitangent + Vector3::from(vertices[c[0] as usize].bitangent)).into();
+                    (bitangent + Vec3::from(vertices[c[0] as usize].bitangent)).into();
                 vertices[c[1] as usize].bitangent =
-                    (bitangent + Vector3::from(vertices[c[1] as usize].bitangent)).into();
+                    (bitangent + Vec3::from(vertices[c[1] as usize].bitangent)).into();
                 vertices[c[2] as usize].bitangent =
-                    (bitangent + Vector3::from(vertices[c[2] as usize].bitangent)).into();
+                    (bitangent + Vec3::from(vertices[c[2] as usize].bitangent)).into();
 
                 triangles_included[c[0] as usize] += 1;
                 triangles_included[c[1] as usize] += 1;
@@ -135,8 +135,8 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
             for (i, n) in triangles_included.into_iter().enumerate() {
                 let denom = 1.0 / n as f32;
                 let v = &mut vertices[i];
-                v.tangent = (Vector3::from(v.tangent) * denom).into();
-                v.bitangent = (Vector3::from(v.bitangent) * denom).into();
+                v.tangent = (Vec3::from(v.tangent) * denom).into();
+                v.bitangent = (Vec3::from(v.bitangent) * denom).into();
             }
 
             let vertex_buffer =

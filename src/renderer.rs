@@ -1,5 +1,5 @@
 use anyhow::Result;
-use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
+use glam::{Quat, Vec3};
 use std::{collections::HashMap, sync::Arc};
 use wgpu::util::DeviceExt;
 use winit::{event::WindowEvent, window::Window};
@@ -191,12 +191,12 @@ impl Renderer {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
                     let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
                     let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let position = Vector3::new(x, 0.0, z);
+                    let position = Vec3::new(x, 0.0, z);
 
-                    let rotation = if position == Vector3::zeros() {
-                        UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 0.0)
+                    let rotation = if position == Vec3::ZERO {
+                        Quat::from_axis_angle(Vec3::Z, 0.0)
                     } else {
-                        UnitQuaternion::from_axis_angle(&UnitVector3::new_normalize(position), 45.0)
+                        Quat::from_axis_angle(position.normalize(), 45.0)
                     };
 
                     Instance { position, rotation }
@@ -405,9 +405,9 @@ impl Renderer {
     }
 
     pub fn update(&mut self, dt: instant::Duration) {
-        let old_position: Vector3<f32> = self.light_uniform.position.into();
-        self.light_uniform.position = (UnitQuaternion::from_axis_angle(
-            &UnitVector3::new_normalize(Vector3::new(0.0, 1.0, 0.0)),
+        let old_position: Vec3 = self.light_uniform.position.into();
+        self.light_uniform.position = (Quat::from_axis_angle(
+            Vec3::Y,
             0.1 * dt.as_secs_f32(),
         ) * old_position)
             .into();
