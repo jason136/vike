@@ -160,7 +160,7 @@ pub async fn run() {
             .expect("Couldn't append canvas to document body.");
     }
 
-    let mut renderer = Renderer::new(window).await;
+    let mut renderer = Renderer::new(window).await.unwrap();
 
     let (mut game_objects, _models) = create_game_objects(&renderer).await;
 
@@ -242,15 +242,15 @@ pub async fn run() {
                         cursor_reset = false;
                     } else {
                         camera_controller.process_mouse(delta.0, delta.1);
-                        let dimensions = renderer.window.inner_size();
-                        renderer
-                            .window
-                            .set_cursor_position(PhysicalPosition::new(
-                                dimensions.width / 2,
-                                dimensions.height / 2,
-                            ))
-                            .unwrap();
-                        cursor_reset = true;    
+                        // let dimensions = renderer.window.inner_size();
+                        // renderer
+                        //     .window
+                        //     .set_cursor_position(PhysicalPosition::new(
+                        //         dimensions.width / 2,
+                        //         dimensions.height / 2,
+                        //     ))
+                        //     .unwrap();
+                        cursor_reset = true;
                     }
                 }
             }

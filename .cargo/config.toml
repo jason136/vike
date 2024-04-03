@@ -7,5 +7,5 @@ rustflags = [
   "-Z", "location-detail=none",
 ]
 
-[unstable]
-build-std = ["panic_abort", "std"]
+# [unstable]
+# build-std = ["panic_abort", "std"]
