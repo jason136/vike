@@ -3,13 +3,11 @@ use wgpu::Operations;
 use crate::{renderer::Renderer, texture::Texture};
 
 pub struct HdrPipeline {
-    pub pipeline: wgpu::RenderPipeline,
-    pub bind_group: wgpu::BindGroup,
-    pub texture: Texture,
-    pub width: u32,
-    pub height: u32,
-    pub format: wgpu::TextureFormat,
-    pub layout: wgpu::BindGroupLayout,
+    pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    texture: Texture,
+    format: wgpu::TextureFormat,
+    layout: wgpu::BindGroupLayout,
 }
 
 impl HdrPipeline {
@@ -86,8 +84,6 @@ impl HdrPipeline {
             bind_group,
             layout,
             texture,
-            width,
-            height,
             format,
         }
     }
@@ -116,8 +112,6 @@ impl HdrPipeline {
             ],
             label: Some("hdr_bind_group"),
         });
-        self.width = width;
-        self.height = height;
     }
 
     pub fn process(&self, encoder: &mut wgpu::CommandEncoder, output: &wgpu::TextureView) {
@@ -138,5 +132,13 @@ impl HdrPipeline {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..3, 0..1);
+    }
+
+    pub fn view(&self) -> &wgpu::TextureView {
+        &self.texture.view
+    }
+
+    pub fn format(&self) -> wgpu::TextureFormat {
+        self.format
     }
 }

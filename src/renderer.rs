@@ -8,7 +8,7 @@ use crate::{
     camera::{Camera, CameraUniform, Projection},
     debug::Debug,
     game_object::{
-        DrawLight, DrawModel, GameObject, GameObjectType, Instance, InstanceRaw, LightUniform,
+        DrawLight, DrawModel, GameObject, GameObjectStore, Instance, InstanceRaw, LightUniform,
         ModelVertex, Vertex,
     },
     hdr::HdrPipeline,
@@ -17,29 +17,29 @@ use crate::{
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
 
+#[allow(dead_code)]
 pub struct Renderer {
-    pub window: Arc<Window>,
-    pub surface: wgpu::Surface<'static>,
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-    pub config: wgpu::SurfaceConfiguration,
-    pub size: winit::dpi::PhysicalSize<u32>,
-    pub render_pipeline: wgpu::RenderPipeline,
-    pub light_render_pipeline: wgpu::RenderPipeline,
-    pub texture_bind_group_layout: wgpu::BindGroupLayout,
-    pub depth_texture: Texture,
-    pub hdr: HdrPipeline,
+    window: Arc<Window>,
+    surface: wgpu::Surface<'static>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    config: wgpu::SurfaceConfiguration,
+    render_pipeline: wgpu::RenderPipeline,
+    light_render_pipeline: wgpu::RenderPipeline,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    depth_texture: Texture,
+    hdr: HdrPipeline,
     pub camera: Camera,
-    pub projection: Projection,
-    pub camera_uniform: CameraUniform,
-    pub camera_buffer: wgpu::Buffer,
-    pub camera_bind_group: wgpu::BindGroup,
-    pub instances: Vec<Instance>,
-    pub instance_buffer: wgpu::Buffer,
-    pub light_uniform: LightUniform,
-    pub light_buffer: wgpu::Buffer,
-    pub light_bind_group_layout: wgpu::BindGroupLayout,
-    pub light_bind_group: wgpu::BindGroup,
+    projection: Projection,
+    camera_uniform: CameraUniform,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    instances: Vec<Instance>,
+    instance_buffer: wgpu::Buffer,
+    light_uniform: LightUniform,
+    light_buffer: wgpu::Buffer,
+    light_bind_group_layout: wgpu::BindGroupLayout,
+    light_bind_group: wgpu::BindGroup,
     pub debug: Debug,
 }
 
@@ -218,13 +218,7 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let light_uniform = LightUniform {
-            position: [2.0, 2.0, 2.0],
-            _padding: 0,
-            color: [1.0, 1.0, 1.0],
-            _padding2: 0,
-        };
-
+        let light_uniform = LightUniform::new();
         let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light VB"),
             contents: bytemuck::cast_slice(&[light_uniform]),
@@ -274,7 +268,7 @@ impl Renderer {
             Self::create_render_pipeline(
                 &device,
                 &layout,
-                hdr.format,
+                hdr.format(),
                 Some(Texture::DEPTH_FORMAT),
                 &[ModelVertex::desc(), InstanceRaw::desc()],
                 wgpu::PrimitiveTopology::TriangleList,
@@ -297,9 +291,9 @@ impl Renderer {
             Self::create_render_pipeline(
                 &device,
                 &layout,
-                hdr.format,
+                hdr.format(),
                 Some(Texture::DEPTH_FORMAT),
-                &[ModelVertex::desc()],
+                &[ModelVertex::desc(), InstanceRaw::desc()],
                 wgpu::PrimitiveTopology::TriangleList,
                 shader,
             )
@@ -313,7 +307,6 @@ impl Renderer {
             device,
             queue,
             config,
-            size,
             render_pipeline,
             light_render_pipeline,
             texture_bind_group_layout,
@@ -393,7 +386,6 @@ impl Renderer {
             self.hdr
                 .resize(&self.device, new_size.width, new_size.height);
 
-            self.size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
@@ -407,10 +399,8 @@ impl Renderer {
         false
     }
 
-    pub fn update(&mut self, dt: instant::Duration) {
-        let old_position: Vec3 = self.light_uniform.position.into();
-        self.light_uniform.position =
-            (Quat::from_axis_angle(Vec3::Y, dt.as_secs_f32()) * old_position).into();
+    pub fn update(&mut self, game_objects: &GameObjectStore, dt: instant::Duration) {
+        self.light_uniform = game_objects.get_light_uniform();
 
         self.queue.write_buffer(
             &self.light_buffer,
@@ -428,10 +418,7 @@ impl Renderer {
         );
     }
 
-    pub fn render(
-        &mut self,
-        game_objects: &HashMap<u32, GameObject>,
-    ) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self, game_objects: &GameObjectStore) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -447,7 +434,7 @@ impl Renderer {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.hdr.texture.view,
+                    view: &self.hdr.view(),
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -473,28 +460,28 @@ impl Renderer {
 
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-            for game_object in game_objects.values() {
-                match &game_object.obj {
-                    GameObjectType::PointLight {
-                        model: Some(model), ..
-                    } => {
-                        render_pass.set_pipeline(&self.light_render_pipeline);
-                        render_pass.draw_light_model(
-                            model,
-                            &self.camera_bind_group,
-                            &self.light_bind_group,
-                        );
-                    }
-                    GameObjectType::Model { model: Some(model) } => {
-                        render_pass.set_pipeline(&self.render_pipeline);
-                        render_pass.draw_model_instanced(
-                            model,
-                            0..self.instances.len() as u32,
-                            &self.camera_bind_group,
-                            &self.light_bind_group,
-                        );
-                    }
-                    _ => {}
+            render_pass.set_pipeline(&self.render_pipeline);
+            for game_object in game_objects.objects.values() {
+                if let Some(model) = game_object.model.as_ref() {
+                    render_pass.draw_model_instanced(
+                        model,
+                        0..self.instances.len() as u32,
+                        &self.camera_bind_group,
+                        &self.light_bind_group,
+                    );
+                }
+            }
+
+            render_pass.set_pipeline(&self.light_render_pipeline);
+            for (_, light) in &game_objects.lights {
+                if let Some(model) = light.model.as_ref() {
+                    println!("rendering light");
+                    render_pass.draw_light_model_instanced(
+                        model,
+                        0..self.instances.len() as u32,
+                        &self.camera_bind_group,
+                        &self.light_bind_group,
+                    );
                 }
             }
         }
@@ -523,5 +510,25 @@ impl Renderer {
         output.present();
 
         Ok(())
+    }
+
+    pub fn window(&self) -> &Window {
+        &self.window
+    }
+
+    pub fn size(&self) -> winit::dpi::PhysicalSize<u32> {
+        self.window.inner_size()
+    }
+
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    pub fn texture_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.texture_bind_group_layout
     }
 }

@@ -46,24 +46,24 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
         let diffuse_texture = load_texture(
             &m.diffuse_texture.unwrap(),
             false,
-            &renderer.device,
-            &renderer.queue,
+            &renderer.device(),
+            &renderer.queue(),
         )
         .await?;
         let normal_texture = load_texture(
             &m.normal_texture.unwrap(),
             true,
-            &renderer.device,
-            &renderer.queue,
+            &renderer.device(),
+            &renderer.queue(),
         )
         .await?;
 
         materials.push(Material::new(
-            &renderer.device,
+            &renderer.device(),
             &m.name,
             diffuse_texture,
             normal_texture,
-            &renderer.texture_bind_group_layout,
+            &renderer.texture_bind_group_layout(),
         ));
     }
 
@@ -141,7 +141,7 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
 
             let vertex_buffer =
                 renderer
-                    .device
+                    .device()
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some(&format!("{:?} Vertex Buffer", file_name)),
                         contents: bytemuck::cast_slice(&vertices),
@@ -149,24 +149,24 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
                     });
             let index_buffer =
                 renderer
-                    .device
+                    .device()
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some(&format!("{:?} Index Buffer", file_name)),
                         contents: bytemuck::cast_slice(&m.mesh.indices),
                         usage: wgpu::BufferUsages::INDEX,
                     });
 
-            Mesh {
-                name: file_name.to_string(),
+            Mesh::new(
+                file_name,
                 vertex_buffer,
                 index_buffer,
-                num_elements: m.mesh.indices.len() as u32,
-                material: m.mesh.material_id.unwrap_or(0),
-            }
+                m.mesh.indices.len() as u32,
+                m.mesh.material_id.unwrap_or(0),
+            )
         })
         .collect();
 
-    Ok(Model { meshes, materials })
+    Ok(Model::new(meshes, materials))
 }
 
 #[cfg(target_arch = "wasm32")]

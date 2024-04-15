@@ -35,12 +35,9 @@ fn vs_main(
     return out;
 }
 
-@group(0)
-@binding(0)
+@group(0) @binding(0)
 var hdr_image: texture_2d<f32>;
-
-@group(0)
-@binding(1)
+@group(0) @binding(1)
 var hdr_sampler: sampler;
 
 @fragment

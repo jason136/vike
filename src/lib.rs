@@ -6,16 +6,17 @@ mod renderer;
 mod resources;
 mod texture;
 
-use game_object::GameObjectType;
-use glam::{Mat3, Vec3};
-use instant::Duration;
+use game_object::{GameObjectStore, Transform3D};
+use glam::{Quat, Vec3};
+use instant::{Duration, Instant};
 use renderer::Renderer;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{DeviceEvent, MouseButton};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::window::CursorGrabMode;
 use winit::{
-    event::{ElementState, Event, WindowEvent},
+    event::{Event, WindowEvent},
     event_loop::EventLoop,
     window::WindowBuilder,
 };
@@ -24,14 +25,10 @@ use winit::{
 use wasm_bindgen::prelude::*;
 
 use crate::camera::CameraController;
-use crate::game_object::{GameObject, Model};
 use crate::resources::load_model;
 
-async fn create_game_objects(
-    renderer: &Renderer,
-) -> (HashMap<u32, GameObject>, HashMap<&'static str, Arc<Model>>) {
-    let mut game_objects: HashMap<u32, GameObject> = HashMap::new();
-    let mut models: HashMap<&str, Arc<Model>> = HashMap::new();
+async fn create_game_objects(renderer: &Renderer) -> GameObjectStore {
+    let mut game_objects = GameObjectStore::new();
 
     let cube_model = Arc::new(load_model("cube.obj", renderer).await.unwrap());
     // let basemesh_model = Arc::new(load_model("basemesh.obj", renderer).await.unwrap());
@@ -39,10 +36,25 @@ async fn create_game_objects(
     // let flat_vase_model = Arc::new(load_model("flat_vase.obj", renderer).await.unwrap());
     // let floor_model = Arc::new(load_model("quad.obj", renderer).await.unwrap());
 
-    let mut game_object = GameObject::new(Some(cube_model.clone()));
-    game_object.transform.translation = [-0.5, 0.5, 0.0].into();
-    game_object.transform.scale = [2.0; 3].into();
-    game_objects.insert(game_object.id, game_object);
+    game_objects.new_game_object(
+        "cube",
+        Transform3D {
+            position: Vec3::new(-0.5, 0.5, 0.0),
+            scale: Vec3::new(2.0, 2.0, 2.0),
+            ..Default::default()
+        },
+        Some(cube_model.clone()),
+    );
+
+    // game_objects.new_game_object(
+    //     "cube",
+    //     Transform3D {
+    //         position: Vec3::new(-0.5, 5.0, 0.0),
+    //         scale: Vec3::new(2.0, 2.0, 2.0),
+    //         ..Default::default()
+    //     },
+    //     Some(cube_model.clone()),
+    // );
 
     // let mut game_object = GameObject::new(Some(cube_model.clone()));
     // game_object.transform.translation = [0.5, 0.5, 0.0].into();
@@ -63,8 +75,49 @@ async fn create_game_objects(
     //     Vector3::new(1.0, 1.0, 1.0),
     // ];
 
-    let point_light = GameObject::new_point_light(Some(cube_model.clone()));
-    game_objects.insert(point_light.id, point_light);
+    // game_objects.new_light(
+    //     "main",
+    //     Transform3D {
+    //         position: Vec3::new(5.0, 2.0, 5.0),
+    //         ..Default::default()
+    //     },
+    //     Some(cube_model.clone()),
+    //     Vec3::new(1.0, 0.0, 0.0),
+    //     10.0,
+    // );
+
+    game_objects.new_light(
+        "main",
+        Transform3D {
+            position: Vec3::new(-5.0, 2.0, 5.0),
+            ..Default::default()
+        },
+        Some(cube_model.clone()),
+        Vec3::new(0.0, 1.0, 0.0),
+        10.0,
+    );
+
+    // game_objects.new_light(
+    //     "main",
+    //     Transform3D {
+    //         position: Vec3::new(5.0, 2.0, -5.0),
+    //         ..Default::default()
+    //     },
+    //     Some(cube_model.clone()),
+    //     Vec3::new(0.0, 0.0, 1.0),
+    //     10.0,
+    // );
+
+    // game_objects.new_light(
+    //     "main",
+    //     Transform3D {
+    //         position: Vec3::new(-5.0, 2.0, -5.0),
+    //         ..Default::default()
+    //     },
+    //     Some(cube_model.clone()),
+    //     Vec3::new(0.0, 0.0, 1.0),
+    //     10.0,
+    // );
 
     // for i in 0..light_colors.len() {
     //     let mut point_light = GameObject::new_point_light(0.5, 0.1, light_colors[i]);
@@ -89,31 +142,36 @@ async fn create_game_objects(
     //     game_objects.insert(game_object.id, game_object);
     // }
 
-    models.insert("cube", cube_model);
     // models.insert("basemesh", basemesh_model);
     // models.insert("smooth_vase", smooth_vase_model);
     // models.insert("flat_vase", flat_vase_model);
     // models.insert("floor", floor_model);
 
-    (game_objects, models)
+    game_objects
 }
 
-fn animate_game_objects(game_objects: &mut HashMap<u32, GameObject>, dt: Duration) {
+fn animate_game_objects(game_objects: &mut GameObjectStore, dt: Duration) {
     let dt_secs = dt.as_secs_f32();
-    for obj in game_objects.values_mut() {
-        match obj.obj {
-            GameObjectType::PointLight { .. } => {
-                let rotation = Mat3::from_axis_angle(Vec3::Y, dt_secs);
-                obj.transform.translation = rotation * obj.transform.translation;
-            }
-            GameObjectType::Model { .. } => {
-                let rotation = Mat3::from_axis_angle(Vec3::Y, dt_secs * 0.01);
 
-                obj.transform.translation = rotation * obj.transform.translation;
-                obj.transform.rotation.y += dt_secs * 0.1;
-            }
-        }
+    for (_, light) in game_objects.lights.iter_mut() {
+        light.transform.position =
+            (Quat::from_axis_angle(Vec3::Y, dt_secs) * light.transform.position).into();
     }
+
+    // for obj in game_objects.values_mut() {
+    //     match obj.obj {
+    //         GameObjectType::PointLight { .. } => {
+    //             let rotation = Mat3::from_axis_angle(Vec3::Y, dt_secs);
+    //             obj.transform.translation = rotation * obj.transform.translation;
+    //         }
+    //         GameObjectType::Model { .. } => {
+    //             let rotation = Mat3::from_axis_angle(Vec3::Y, dt_secs * 0.01);
+
+    //             obj.transform.translation = rotation * obj.transform.translation;
+    //             obj.transform.rotation.y += dt_secs * 0.1;
+    //         }
+    //     }
+    // }
 
     // let mut game_object = GameObject::new(Some(models["basemesh"].clone()));
     // game_object.transform.translation = [4.0, -1.0, 0.0].into();
@@ -162,7 +220,7 @@ pub async fn run() {
 
     let mut renderer = Renderer::new(window).await;
 
-    let (mut game_objects, _models) = create_game_objects(&renderer).await;
+    let mut game_objects = create_game_objects(&renderer).await;
 
     let mut camera_controller = CameraController::new(4.0, 0.6);
     let mut focused = true;
@@ -173,12 +231,12 @@ pub async fn run() {
     event_loop
         .run(move |event, elwt| match event {
             Event::AboutToWait => {
-                renderer.window.request_redraw();
+                renderer.window().request_redraw();
             }
             Event::WindowEvent {
                 window_id,
                 ref event,
-            } if window_id == renderer.window.id() && !renderer.input(event) => match event {
+            } if window_id == renderer.window().id() && !renderer.input(event) => match event {
                 WindowEvent::RedrawRequested => {
                     let now = instant::Instant::now();
                     let dt = now - last_render_time;
@@ -186,12 +244,12 @@ pub async fn run() {
 
                     animate_game_objects(&mut game_objects, dt);
                     camera_controller.update_camera(&mut renderer.camera, dt);
-                    renderer.update(dt);
+                    renderer.update(&game_objects, dt);
 
                     match renderer.render(&game_objects) {
                         Ok(_) => {}
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            renderer.resize(renderer.size)
+                            renderer.resize(renderer.size())
                         }
                         Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
                         Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
@@ -201,8 +259,8 @@ pub async fn run() {
                     if let PhysicalKey::Code(code) = event.physical_key {
                         match code {
                             KeyCode::Escape => {
-                                focused = !focused;
-                                renderer.window.set_cursor_visible(!focused);
+                                focused = false;
+                                renderer.window().set_cursor_visible(true);
                             }
                             _ => camera_controller.process_keyboard(code, event.state),
                         }
@@ -214,18 +272,20 @@ pub async fn run() {
                 }
                 WindowEvent::MouseInput {
                     button: MouseButton::Left,
-                    state,
                     ..
-                } => focused = state == &ElementState::Pressed,
+                } => {
+                    focused = true;
+                    renderer.window().set_cursor_visible(false);
+                }
                 WindowEvent::Resized(physical_size) => {
                     renderer.resize(*physical_size);
                 }
                 WindowEvent::ScaleFactorChanged { .. } => {
-                    renderer.resize(renderer.window.inner_size());
+                    renderer.resize(renderer.window().inner_size());
                 }
                 WindowEvent::Focused(focus) => {
                     focused = *focus;
-                    renderer.window.set_cursor_visible(!focused);
+                    renderer.window().set_cursor_visible(!focused);
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::CloseRequested => {
@@ -238,19 +298,27 @@ pub async fn run() {
                 ..
             } => {
                 if focused {
+                    println!("time: {:?}", Instant::now());
                     if cursor_reset {
                         cursor_reset = false;
+                        println!("ignored: {:?}", event);
                     } else {
+                        println!("processed: {:?}", event);
                         camera_controller.process_mouse(delta.0, delta.1);
-                        let dimensions = renderer.window.inner_size();
+
+                        // let dimensions = renderer.window().inner_size();
+                        // renderer
+                        //     .window()
+                        //     .set_cursor_position(PhysicalPosition::new(
+                        //         dimensions.width / 2,
+                        //         dimensions.height / 2,
+                        //     ))
+                        //     .unwrap();
+
                         renderer
-                            .window
-                            .set_cursor_position(PhysicalPosition::new(
-                                dimensions.width / 2,
-                                dimensions.height / 2,
-                            ))
-                            .unwrap();
-                        cursor_reset = true;    
+                            .window()
+                            .set_cursor_grab(CursorGrabMode::Locked)
+                            .expect("Failed to grab cursor");
                     }
                 }
             }
