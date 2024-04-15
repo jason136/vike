@@ -1,6 +1,6 @@
 use anyhow::Result;
-use glam::{Quat, Vec3};
-use std::{collections::HashMap, sync::Arc};
+use glam::Vec3;
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::{event::WindowEvent, window::Window};
 
@@ -8,14 +8,13 @@ use crate::{
     camera::{Camera, CameraUniform, Projection},
     debug::Debug,
     game_object::{
-        DrawLight, DrawModel, GameObject, GameObjectStore, Instance, InstanceRaw, LightUniform,
-        ModelVertex, Vertex,
+        DrawLight, DrawModel, GameObjectStore, InstanceRaw, LightUniform, ModelVertex, Transform3D,
+        Vertex,
     },
     hdr::HdrPipeline,
     texture::Texture,
+    MAX_INSTANCES,
 };
-
-const NUM_INSTANCES_PER_ROW: u32 = 10;
 
 #[allow(dead_code)]
 pub struct Renderer {
@@ -34,9 +33,7 @@ pub struct Renderer {
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
-    light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group_layout: wgpu::BindGroupLayout,
     light_bind_group: wgpu::BindGroup,
@@ -189,33 +186,19 @@ impl Renderer {
             label: Some("camera_bind_group"),
         });
 
-        const SPACE_BETWEEN: f32 = 3.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let position = Vec3::new(x, 0.0, z);
+        let instances = (0..MAX_INSTANCES).map(move |_| Transform3D {
+            position: Vec3::new(0.0, 0.0, 0.0),
+            rotation: Vec3::new(0.0, 0.0, 0.0),
+            scale: Vec3::new(1.0, 1.0, 1.0),
+        });
 
-                    let rotation = if position == Vec3::ZERO {
-                        Quat::from_axis_angle(Vec3::Z, 0.0)
-                    } else {
-                        Quat::from_axis_angle(position.normalize(), 45.0)
-                    };
-
-                    Instance { position, rotation }
-                })
-            })
-            .collect::<Vec<Instance>>();
-
-        let instance_data = instances
-            .iter()
-            .map(Instance::to_raw)
+        let instance_data: Vec<InstanceRaw> = instances
+            .map(|i| i.to_raw_instance())
             .collect::<Vec<InstanceRaw>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
+            label: Some("Transform3D Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
         let light_uniform = LightUniform::new();
@@ -317,9 +300,7 @@ impl Renderer {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            instances,
             instance_buffer,
-            light_uniform,
             light_buffer,
             light_bind_group_layout,
             light_bind_group,
@@ -399,26 +380,30 @@ impl Renderer {
         false
     }
 
-    pub fn update(&mut self, game_objects: &GameObjectStore, dt: instant::Duration) {
-        self.light_uniform = game_objects.get_light_uniform();
-
+    pub fn render(&mut self, game_objects: &GameObjectStore) -> Result<(), wgpu::SurfaceError> {
+        let light_uniform = game_objects.light_uniform();
         self.queue.write_buffer(
             &self.light_buffer,
             0,
-            bytemuck::cast_slice(&[self.light_uniform]),
+            bytemuck::cast_slice(&[light_uniform]),
         );
 
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
-
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
-    }
 
-    pub fn render(&mut self, game_objects: &GameObjectStore) -> Result<(), wgpu::SurfaceError> {
+        let game_object_instances = game_objects.instances();
+
+        self.queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&game_object_instances.instances),
+        );
+
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -434,7 +419,7 @@ impl Renderer {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.hdr.view(),
+                    view: self.hdr.view(),
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -461,28 +446,23 @@ impl Renderer {
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
             render_pass.set_pipeline(&self.render_pipeline);
-            for game_object in game_objects.objects.values() {
-                if let Some(model) = game_object.model.as_ref() {
-                    render_pass.draw_model_instanced(
-                        model,
-                        0..self.instances.len() as u32,
-                        &self.camera_bind_group,
-                        &self.light_bind_group,
-                    );
-                }
+            for (model, range) in &game_object_instances.objects {
+                render_pass.draw_model_instanced(
+                    model,
+                    range.clone(),
+                    &self.camera_bind_group,
+                    &self.light_bind_group,
+                );
             }
 
             render_pass.set_pipeline(&self.light_render_pipeline);
-            for (_, light) in &game_objects.lights {
-                if let Some(model) = light.model.as_ref() {
-                    println!("rendering light");
-                    render_pass.draw_light_model_instanced(
-                        model,
-                        0..self.instances.len() as u32,
-                        &self.camera_bind_group,
-                        &self.light_bind_group,
-                    );
-                }
+            for (model, range) in &game_object_instances.lights {
+                render_pass.draw_light_model_instanced(
+                    model,
+                    range.clone(),
+                    &self.camera_bind_group,
+                    &self.light_bind_group,
+                );
             }
         }
 

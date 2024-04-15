@@ -158,11 +158,7 @@ impl CameraController {
         self.rotate_horizontal = 0.0;
         self.rotate_vertical = 0.0;
 
-        if camera.pitch < -SAFE_FRAC_PI_2 {
-            camera.pitch = -SAFE_FRAC_PI_2;
-        } else if camera.pitch > SAFE_FRAC_PI_2 {
-            camera.pitch = SAFE_FRAC_PI_2;
-        }
+        camera.pitch = camera.pitch.clamp(-SAFE_FRAC_PI_2, SAFE_FRAC_PI_2);
     }
 }
 

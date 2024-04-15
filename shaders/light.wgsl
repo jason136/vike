@@ -11,9 +11,14 @@ var<uniform> camera: Camera;
 struct Light {
     position: vec3<f32>,
     color: vec3<f32>,
+    intensity: f32,
+}
+struct LightUniform {
+    numLights: u32,
+    lights: array<Light, 128>,
 }
 @group(1) @binding(0)
-var<uniform> light: Light;
+var<uniform> lights: LightUniform;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -24,9 +29,7 @@ struct InstanceInput {
     @location(6) model_matrix_1: vec4<f32>,
     @location(7) model_matrix_2: vec4<f32>,
     @location(8) model_matrix_3: vec4<f32>,
-    @location(9) normal_matrix_0: vec3<f32>,
-    @location(10) normal_matrix_1: vec3<f32>,
-    @location(11) normal_matrix_2: vec3<f32>,
+    @location(9) color: vec3<f32>,
 }
 
 struct VertexOutput {
@@ -45,12 +48,11 @@ fn vs_main(
         instance.model_matrix_2,
         instance.model_matrix_3,
     );
-    
-    let scale = 0.25;
+
     var out: VertexOutput;
     let world_position = model_matrix * vec4<f32>(model.position, 1.0);
     out.clip_position = camera.view_proj * world_position;
-    out.color = light.color;
+    out.color = instance.color;
     return out;
 }
 

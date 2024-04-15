@@ -6,12 +6,12 @@ mod renderer;
 mod resources;
 mod texture;
 
+use anyhow::Result;
 use game_object::{GameObjectStore, Transform3D};
 use glam::{Quat, Vec3};
-use instant::{Duration, Instant};
+use instant::Duration;
 use renderer::Renderer;
-use std::sync::Arc;
-use winit::dpi::{LogicalSize, PhysicalPosition};
+use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, MouseButton};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::CursorGrabMode;
@@ -25,12 +25,14 @@ use winit::{
 use wasm_bindgen::prelude::*;
 
 use crate::camera::CameraController;
-use crate::resources::load_model;
 
-async fn create_game_objects(renderer: &Renderer) -> GameObjectStore {
+const MAX_LIGHTS: usize = 128;
+const MAX_INSTANCES: usize = 1024;
+
+async fn create_game_objects(renderer: &Renderer) -> Result<GameObjectStore> {
     let mut game_objects = GameObjectStore::new();
 
-    let cube_model = Arc::new(load_model("cube.obj", renderer).await.unwrap());
+    let cube_model = game_objects.load_model("cube.obj", renderer).await?;
     // let basemesh_model = Arc::new(load_model("basemesh.obj", renderer).await.unwrap());
     // let smooth_vase_model = Arc::new(load_model("smooth_vase.obj", renderer).await.unwrap());
     // let flat_vase_model = Arc::new(load_model("flat_vase.obj", renderer).await.unwrap());
@@ -75,38 +77,38 @@ async fn create_game_objects(renderer: &Renderer) -> GameObjectStore {
     //     Vector3::new(1.0, 1.0, 1.0),
     // ];
 
-    // game_objects.new_light(
-    //     "main",
-    //     Transform3D {
-    //         position: Vec3::new(5.0, 2.0, 5.0),
-    //         ..Default::default()
-    //     },
-    //     Some(cube_model.clone()),
-    //     Vec3::new(1.0, 0.0, 0.0),
-    //     10.0,
-    // );
+    game_objects.new_light(
+        "red",
+        Transform3D {
+            position: Vec3::new(5.0, 2.0, 5.0),
+            ..Default::default()
+        },
+        Some(cube_model.clone()),
+        Vec3::new(1.0, 0.0, 0.0),
+        50.0,
+    );
 
     game_objects.new_light(
-        "main",
+        "green",
         Transform3D {
             position: Vec3::new(-5.0, 2.0, 5.0),
             ..Default::default()
         },
         Some(cube_model.clone()),
         Vec3::new(0.0, 1.0, 0.0),
-        10.0,
+        50.0,
     );
 
-    // game_objects.new_light(
-    //     "main",
-    //     Transform3D {
-    //         position: Vec3::new(5.0, 2.0, -5.0),
-    //         ..Default::default()
-    //     },
-    //     Some(cube_model.clone()),
-    //     Vec3::new(0.0, 0.0, 1.0),
-    //     10.0,
-    // );
+    game_objects.new_light(
+        "blue",
+        Transform3D {
+            position: Vec3::new(5.0, 2.0, -5.0),
+            ..Default::default()
+        },
+        Some(cube_model.clone()),
+        Vec3::new(0.0, 0.0, 1.0),
+        50.0,
+    );
 
     // game_objects.new_light(
     //     "main",
@@ -147,15 +149,15 @@ async fn create_game_objects(renderer: &Renderer) -> GameObjectStore {
     // models.insert("flat_vase", flat_vase_model);
     // models.insert("floor", floor_model);
 
-    game_objects
+    Ok(game_objects)
 }
 
 fn animate_game_objects(game_objects: &mut GameObjectStore, dt: Duration) {
     let dt_secs = dt.as_secs_f32();
 
-    for (_, light) in game_objects.lights.iter_mut() {
+    for (_, light) in game_objects.lights_mut() {
         light.transform.position =
-            (Quat::from_axis_angle(Vec3::Y, dt_secs) * light.transform.position).into();
+            Quat::from_axis_angle(Vec3::Y, dt_secs) * light.transform.position;
     }
 
     // for obj in game_objects.values_mut() {
@@ -220,11 +222,10 @@ pub async fn run() {
 
     let mut renderer = Renderer::new(window).await;
 
-    let mut game_objects = create_game_objects(&renderer).await;
+    let mut game_objects = create_game_objects(&renderer).await.unwrap();
 
     let mut camera_controller = CameraController::new(4.0, 0.6);
     let mut focused = true;
-    let mut cursor_reset = false;
 
     let mut last_render_time = instant::Instant::now();
 
@@ -244,7 +245,6 @@ pub async fn run() {
 
                     animate_game_objects(&mut game_objects, dt);
                     camera_controller.update_camera(&mut renderer.camera, dt);
-                    renderer.update(&game_objects, dt);
 
                     match renderer.render(&game_objects) {
                         Ok(_) => {}
@@ -261,6 +261,10 @@ pub async fn run() {
                             KeyCode::Escape => {
                                 focused = false;
                                 renderer.window().set_cursor_visible(true);
+                                renderer
+                                    .window()
+                                    .set_cursor_grab(CursorGrabMode::None)
+                                    .unwrap();
                             }
                             _ => camera_controller.process_keyboard(code, event.state),
                         }
@@ -276,6 +280,10 @@ pub async fn run() {
                 } => {
                     focused = true;
                     renderer.window().set_cursor_visible(false);
+                    renderer
+                        .window()
+                        .set_cursor_grab(CursorGrabMode::Locked)
+                        .unwrap();
                 }
                 WindowEvent::Resized(physical_size) => {
                     renderer.resize(*physical_size);
@@ -286,6 +294,17 @@ pub async fn run() {
                 WindowEvent::Focused(focus) => {
                     focused = *focus;
                     renderer.window().set_cursor_visible(!focused);
+                    if focused {
+                        renderer
+                            .window()
+                            .set_cursor_grab(CursorGrabMode::Locked)
+                            .unwrap();
+                    } else {
+                        renderer
+                            .window()
+                            .set_cursor_grab(CursorGrabMode::None)
+                            .unwrap();
+                    }
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::CloseRequested => {
@@ -298,28 +317,7 @@ pub async fn run() {
                 ..
             } => {
                 if focused {
-                    println!("time: {:?}", Instant::now());
-                    if cursor_reset {
-                        cursor_reset = false;
-                        println!("ignored: {:?}", event);
-                    } else {
-                        println!("processed: {:?}", event);
-                        camera_controller.process_mouse(delta.0, delta.1);
-
-                        // let dimensions = renderer.window().inner_size();
-                        // renderer
-                        //     .window()
-                        //     .set_cursor_position(PhysicalPosition::new(
-                        //         dimensions.width / 2,
-                        //         dimensions.height / 2,
-                        //     ))
-                        //     .unwrap();
-
-                        renderer
-                            .window()
-                            .set_cursor_grab(CursorGrabMode::Locked)
-                            .expect("Failed to grab cursor");
-                    }
+                    camera_controller.process_mouse(delta.0, delta.1);
                 }
             }
             _ => (),

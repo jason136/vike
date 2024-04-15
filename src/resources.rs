@@ -11,17 +11,17 @@ use crate::{
 };
 
 pub async fn load_texture(
-    file_name: &str,
+    filename: &str,
     is_normal_map: bool,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Result<Texture> {
-    let data = load_binary(file_name).await?;
-    Texture::from_bytes(device, queue, &data, file_name, is_normal_map)
+    let data = load_binary(filename).await?;
+    Texture::from_bytes(device, queue, &data, filename, is_normal_map)
 }
 
-pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<Model> {
-    let obj_text = load_string(file_name).await?;
+pub async fn load_model(filename: &str, renderer: &Renderer) -> anyhow::Result<Model> {
+    let obj_text = load_string(filename).await?;
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
@@ -46,24 +46,24 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
         let diffuse_texture = load_texture(
             &m.diffuse_texture.unwrap(),
             false,
-            &renderer.device(),
-            &renderer.queue(),
+            renderer.device(),
+            renderer.queue(),
         )
         .await?;
         let normal_texture = load_texture(
             &m.normal_texture.unwrap(),
             true,
-            &renderer.device(),
-            &renderer.queue(),
+            renderer.device(),
+            renderer.queue(),
         )
         .await?;
 
         materials.push(Material::new(
-            &renderer.device(),
+            renderer.device(),
             &m.name,
             diffuse_texture,
             normal_texture,
-            &renderer.texture_bind_group_layout(),
+            renderer.texture_bind_group_layout(),
         ));
     }
 
@@ -143,7 +143,7 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
                 renderer
                     .device()
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("{:?} Vertex Buffer", file_name)),
+                        label: Some(&format!("{:?} Vertex Buffer", filename)),
                         contents: bytemuck::cast_slice(&vertices),
                         usage: wgpu::BufferUsages::VERTEX,
                     });
@@ -151,13 +151,13 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
                 renderer
                     .device()
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("{:?} Index Buffer", file_name)),
+                        label: Some(&format!("{:?} Index Buffer", filename)),
                         contents: bytemuck::cast_slice(&m.mesh.indices),
                         usage: wgpu::BufferUsages::INDEX,
                     });
 
             Mesh::new(
-                file_name,
+                filename,
                 vertex_buffer,
                 index_buffer,
                 m.mesh.indices.len() as u32,
@@ -166,22 +166,22 @@ pub async fn load_model(file_name: &str, renderer: &Renderer) -> anyhow::Result<
         })
         .collect();
 
-    Ok(Model::new(meshes, materials))
+    Ok(Model::new(filename, meshes, materials))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn format_url(file_name: &str) -> reqwest::Url {
+fn format_url(filename: &str) -> reqwest::Url {
     let window = web_sys::window().unwrap();
     let location = window.location();
     let origin = location.origin().unwrap();
     let base = reqwest::Url::parse(&format!("{}/", origin)).unwrap();
-    base.join(file_name).unwrap()
+    base.join(filename).unwrap()
 }
 
-pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
+pub async fn load_string(filename: &str) -> anyhow::Result<String> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
-            let url = format_url(file_name);
+            let url = format_url(filename);
             let txt = reqwest::get(url)
                 .await?
                 .text()
@@ -189,7 +189,7 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
         } else {
             let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
                 .join("models")
-                .join(file_name);
+                .join(filename);
             let txt = std::fs::read_to_string(path)?;
         }
     }
@@ -197,10 +197,10 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
     Ok(txt)
 }
 
-pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
+pub async fn load_binary(filename: &str) -> anyhow::Result<Vec<u8>> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
-            let url = format_url(file_name);
+            let url = format_url(filename);
             let data = reqwest::get(url)
                 .await?
                 .bytes()
@@ -209,7 +209,7 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
         } else {
             let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
                 .join("models")
-                .join(file_name);
+                .join(filename);
             let data = std::fs::read(path)?;
         }
     }

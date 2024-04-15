@@ -44,6 +44,7 @@ struct VertexOutput {
     @location(1) tex_coords: vec2<f32>,
     @location(2) tangent_position: vec3<f32>,
     @location(3) tangent_view_position: vec3<f32>,
+    @location(4) tangent_light_position: vec3<f32>,
  }
 
 @vertex
@@ -80,6 +81,7 @@ fn vs_main(
     out.tex_coords = model.tex_coords;
     out.tangent_position = tangent_matrix * world_position.xyz;
     out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
+    out.tangent_light_position = tangent_matrix * lights.lights[0].position;
     return out;
 }
 
@@ -101,13 +103,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     for (var i: u32 = 0; i < lights.numLights; i = i + 1) {
         let light = lights.lights[i];
         let light_distance = length(in.world_position - light.position);
-        let light_intensity = clamp(10.0 / (light_distance * light_distance), 0.01, 10.0);
+        let light_intensity = clamp(light.intensity / (light_distance * light_distance), 0.01, 10.0);
 
         let ambient_strength = 0.001;
         let ambient_color = light.color * ambient_strength;
 
         let tangent_normal = object_normal.xyz * 2.0 - 1.0;
-        let light_dir = normalize(in.world_position - light.position); // this should be in tangent space
+        let light_dir = normalize(in.tangent_light_position - in.tangent_position); // this should be in tangent space
         let view_dir = normalize(in.tangent_view_position - in.tangent_position);
         let half_dir = normalize(view_dir + light_dir);
 

@@ -1,20 +1,47 @@
+use crate::renderer::Renderer;
+use crate::resources::load_model;
 use crate::texture::Texture;
+use crate::MAX_LIGHTS;
+use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat3, Mat4, Quat, Vec3};
-use std::collections::HashMap;
+use glam::{Mat3, Mat4, Vec3};
+use std::collections::btree_map::{Iter, IterMut};
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::sync::Arc;
 
 pub struct GameObjectStore {
-    pub objects: HashMap<String, GameObject>,
-    pub lights: Vec<(String, GameLight)>,
+    objects: BTreeMap<String, GameObject>,
+    models: HashMap<String, Arc<Model>>,
+    lights: BTreeMap<String, GameLight>,
+    models_to_objects: BTreeMap<String, Vec<String>>,
+    models_to_lights: BTreeMap<String, Vec<String>>,
+}
+
+pub struct GameObjectInstances {
+    pub objects: Vec<(Arc<Model>, Range<u32>)>,
+    pub lights: Vec<(Arc<Model>, Range<u32>)>,
+    pub instances: Vec<InstanceRaw>,
 }
 
 impl GameObjectStore {
     pub fn new() -> Self {
         Self {
-            objects: HashMap::new(),
-            lights: Vec::new(),
+            objects: BTreeMap::new(),
+            models: HashMap::new(),
+            lights: BTreeMap::new(),
+            models_to_objects: BTreeMap::new(),
+            models_to_lights: BTreeMap::new(),
+        }
+    }
+
+    pub async fn load_model(&mut self, filename: &str, renderer: &Renderer) -> Result<Arc<Model>> {
+        if let Some(model) = self.models.get(filename) {
+            Ok(model.clone())
+        } else {
+            let model = Arc::new(load_model(filename, renderer).await?);
+            self.models.insert(filename.to_string(), model.clone());
+            Ok(model)
         }
     }
 
@@ -24,9 +51,20 @@ impl GameObjectStore {
         transform: Transform3D,
         model: Option<Arc<Model>>,
     ) {
-        let obj = GameObject { transform, model };
+        let obj = GameObject {
+            transform,
+            model: model.clone(),
+        };
 
         self.objects.insert(name.to_string(), obj);
+        if let Some(model) = model {
+            if let Some(vec) = self.models_to_objects.get_mut(&model.name) {
+                vec.push(name.to_string());
+            } else {
+                self.models_to_objects
+                    .insert(model.name.clone(), vec![name.to_string()]);
+            }
+        }
     }
 
     pub fn new_light(
@@ -39,43 +77,144 @@ impl GameObjectStore {
     ) {
         let light = GameLight {
             transform,
-            model,
+            model: model.clone(),
             color,
             intensity,
         };
 
-        self.lights.push((name.to_string(), light));
-    }
-
-    pub fn get_object(&mut self, name: &str) -> Option<&mut GameObject> {
-        self.objects.get_mut(name)
-    }
-
-    pub fn get_light(&mut self, name: &str) -> Option<&mut GameLight> {
-        self.lights
-            .iter_mut()
-            .find(|(n, _)| n == name)
-            .map(|(_, l)| l)
-    }
-
-    pub fn get_light_uniform(&self) -> LightUniform {
-        let mut light_uniform = LightUniform::new();
-
-        for i in 0..MAX_LIGHTS {
-            if let Some(light) = self.lights.get(i).map(|(_, l)| l) {
-                light_uniform.lights[i] = Light {
-                    position: light.transform.position.into(),
-                    color: light.color.into(),
-                    intensity: light.intensity,
-                    _padding: 0,
-                };
+        self.lights.insert(name.to_string(), light);
+        if let Some(model) = model {
+            if let Some(vec) = self.models_to_lights.get_mut(&model.name) {
+                vec.push(name.to_string());
             } else {
+                self.models_to_lights
+                    .insert(model.name.clone(), vec![name.to_string()]);
+            }
+        }
+    }
+
+    pub fn delete_object(&mut self, name: &str) -> Option<GameObject> {
+        let object = self.objects.remove(name)?;
+        if let Some(model) = &object.model {
+            let vec = self.models_to_objects.get_mut(&model.name).unwrap();
+            let index = vec.iter().position(|x| *x == model.name).unwrap();
+            vec.swap_remove(index);
+            if vec.is_empty() {
+                self.models_to_objects.remove(&model.name);
+            }
+        }
+
+        Some(object)
+    }
+
+    pub fn delete_light(&mut self, name: &str) -> Option<GameLight> {
+        let light = self.lights.remove(name)?;
+        if let Some(model) = &light.model {
+            let vec = self.models_to_lights.get_mut(&model.name).unwrap();
+            let index = vec.iter().position(|x| *x == model.name).unwrap();
+            vec.swap_remove(index);
+            if vec.is_empty() {
+                self.models_to_lights.remove(&model.name);
+            }
+        }
+
+        Some(light)
+    }
+
+    pub fn light_uniform(&self) -> LightUniform {
+        let mut light_uniform = LightUniform::new();
+        for (index, light) in self.lights.values().enumerate() {
+            if index >= MAX_LIGHTS {
                 break;
             }
+            light_uniform.lights[index] = Light {
+                position: light.transform.position.into(),
+                color: light.color.into(),
+                intensity: light.intensity,
+                _padding: 0,
+            };
         }
 
         light_uniform.num_lights = std::cmp::max(self.lights.len(), MAX_LIGHTS) as u32;
         light_uniform
+    }
+
+    pub fn instances(&self) -> GameObjectInstances {
+        let mut instances = Vec::new();
+        let mut object_models = Vec::new();
+        let mut light_models = Vec::new();
+
+        let (mut start, mut end) = (0, 0);
+        let mut curr_model = Arc::new(Model {
+            name: "".to_string(),
+            meshes: Vec::new(),
+            materials: Vec::new(),
+        });
+        for (model_name, object_names) in &self.models_to_objects {
+            for object_name in object_names {
+                let object = self.objects.get(object_name).unwrap();
+                instances.push(object.transform.to_raw_instance());
+                if &curr_model.name == model_name {
+                    end += 1;
+                } else {
+                    if start != end {
+                        object_models.push((curr_model, start..end));
+                    }
+                    curr_model = self.models.get(model_name).unwrap().clone();
+                    (start, end) = (end, end + 1);
+                }
+            }
+        }
+        object_models.push((curr_model.clone(), start..end));
+        start = end;
+        for (model_name, light_names) in &self.models_to_lights {
+            for light_name in light_names {
+                let light = self.lights.get(light_name).unwrap();
+                let mut instance = light.transform.to_raw_instance();
+                instance.normal[0] = light.color.into();
+                instances.push(instance);
+                if &curr_model.name == model_name {
+                    end += 1;
+                } else {
+                    if start != end {
+                        light_models.push((curr_model, start..end));
+                    }
+                    curr_model = self.models.get(model_name).unwrap().clone();
+                    (start, end) = (end, end + 1);
+                }
+            }
+        }
+        light_models.push((curr_model.clone(), start..end));
+
+        GameObjectInstances {
+            objects: object_models,
+            lights: light_models,
+            instances,
+        }
+    }
+
+    pub fn object(&mut self, name: &str) -> Option<&mut GameObject> {
+        self.objects.get_mut(name)
+    }
+
+    pub fn light(&mut self, name: &str) -> Option<&mut GameLight> {
+        self.lights.get_mut(name)
+    }
+
+    pub fn objects(&self) -> Iter<'_, String, GameObject> {
+        self.objects.iter()
+    }
+
+    pub fn lights(&self) -> Iter<'_, String, GameLight> {
+        self.lights.iter()
+    }
+
+    pub fn objects_mut(&mut self) -> IterMut<'_, String, GameObject> {
+        self.objects.iter_mut()
+    }
+
+    pub fn lights_mut(&mut self) -> IterMut<'_, String, GameLight> {
+        self.lights.iter_mut()
     }
 }
 
@@ -83,8 +222,6 @@ pub struct GameObject {
     pub transform: Transform3D,
     pub model: Option<Arc<Model>>,
 }
-
-const MAX_LIGHTS: usize = 128;
 
 pub struct GameLight {
     pub transform: Transform3D,
@@ -96,14 +233,20 @@ pub struct GameLight {
 #[derive(Clone, Debug)]
 pub struct Transform3D {
     pub position: Vec3,
-    pub scale: Vec3,
     pub rotation: Vec3,
+    pub scale: Vec3,
 }
 
-#[allow(dead_code)]
+#[repr(C)]
+#[derive(Copy, Clone, Zeroable, Pod)]
+pub struct InstanceRaw {
+    model: [[f32; 4]; 4],
+    normal: [[f32; 3]; 3],
+}
+
 #[rustfmt::skip]
 impl Transform3D {
-    pub fn mat4(&self) -> Mat4 {
+    pub fn model(&self) -> Mat4 {
         let c3 = self.rotation.z.cos();
         let s3 = self.rotation.z.sin();
         let c2 = self.rotation.x.cos();
@@ -134,7 +277,7 @@ impl Transform3D {
         ])
     }
 
-    pub fn normal_matrix(&self) -> Mat4 {
+    pub fn normal(&self) -> Mat3 {
         let c3 = self.rotation.z.cos();
         let s3 = self.rotation.z.sin();
         let c2 = self.rotation.x.cos();
@@ -143,24 +286,39 @@ impl Transform3D {
         let s1 = self.rotation.y.sin();
         let inv_scale = Vec3::new(1.0 / self.scale.x, 1.0 / self.scale.y, 1.0 / self.scale.z);
 
-        Mat4::from_cols_array(&[
+        Mat3::from_cols_array(&[
             inv_scale.x * (c1 * c3 + s1 * s2 * s3),
             inv_scale.x * (c2 * s3),
             inv_scale.x * (c1 * s2 * s3 - c3 * s1),
-            0.0,
 
             inv_scale.y * (c3 * s1 * s2 - c1 * s3),
             inv_scale.y * (c2 * c3),
             inv_scale.y * (c1 * c3 * s2 + s1 * s3),
-            0.0,
 
             inv_scale.z * (c2 * s1),
             inv_scale.z * (-s2),
             inv_scale.z * (c1 * c2),
-            0.0,
-
-            0.0, 0.0, 0.0, 0.0,
         ])
+    }
+
+    pub fn to_raw_instance(&self) -> InstanceRaw {
+        // let rotation = Quat::from_euler(
+        //     glam::EulerRot::XYZ,
+        //     self.rotation.x,
+        //     self.rotation.y,
+        //     self.rotation.z,
+        // );
+        // let model = Mat4::from_scale(self.scale)
+        //     * Mat4::from_translation(self.position)
+        //     * Mat4::from_quat(rotation);
+        // InstanceRaw {
+        //     model: model.to_cols_array_2d(),
+        //     normal: Mat3::from_quat(rotation).to_cols_array_2d(),
+        // }
+        InstanceRaw {
+            model: self.model().to_cols_array_2d(),
+            normal: self.normal().to_cols_array_2d(),
+        }
     }
 }
 
@@ -168,14 +326,10 @@ impl Default for Transform3D {
     fn default() -> Self {
         Transform3D {
             position: Vec3::new(0.0, 0.0, 0.0),
-            scale: Vec3::new(1.0, 1.0, 1.0),
             rotation: Vec3::new(0.0, 0.0, 0.0),
+            scale: Vec3::new(1.0, 1.0, 1.0),
         }
     }
-}
-
-pub trait Vertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static>;
 }
 
 #[repr(C)]
@@ -186,42 +340,6 @@ pub struct ModelVertex {
     pub normal: [f32; 3],
     pub tangent: [f32; 3],
     pub bitangent: [f32; 3],
-}
-
-impl Vertex for ModelVertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 5]>() as wgpu::BufferAddress,
-                    shader_location: 2,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
-                    shader_location: 3,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 11]>() as wgpu::BufferAddress,
-                    shader_location: 4,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-            ],
-        }
-    }
 }
 
 #[repr(C)]
@@ -256,7 +374,6 @@ impl LightUniform {
     }
 }
 
-#[derive(Debug)]
 // #[allow(dead_code)]
 pub struct Material {
     pub name: String,
@@ -265,20 +382,19 @@ pub struct Material {
     bind_group: wgpu::BindGroup,
 }
 
-#[derive(Debug)]
 #[allow(dead_code)]
 pub struct Mesh {
     pub name: String,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_elements: u32,
-    material: usize,
+    pub material: usize,
 }
 
-#[derive(Debug)]
 pub struct Model {
-    meshes: Vec<Mesh>,
-    materials: Vec<Material>,
+    pub name: String,
+    pub meshes: Vec<Mesh>,
+    pub materials: Vec<Material>,
 }
 
 impl Mesh {
@@ -340,8 +456,12 @@ impl Material {
 }
 
 impl Model {
-    pub fn new(meshes: Vec<Mesh>, materials: Vec<Material>) -> Self {
-        Self { meshes, materials }
+    pub fn new(name: &str, meshes: Vec<Mesh>, materials: Vec<Material>) -> Self {
+        Self {
+            name: name.to_string(),
+            meshes,
+            materials,
+        }
     }
 }
 
@@ -515,13 +635,6 @@ where
         camera_bind_group: &'b wgpu::BindGroup,
         light_bind_group: &'b wgpu::BindGroup,
     ) {
-        // self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-        // self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        // self.set_bind_group(0, &material.bind_group, &[]);
-        // self.set_bind_group(1, camera_bind_group, &[]);
-        // self.set_bind_group(2, light_bind_group, &[]);
-        // self.draw_indexed(0..mesh.num_elements, 0, instances);
-        
         self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
         self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         self.set_bind_group(0, camera_bind_group, &[]);
@@ -555,24 +668,42 @@ where
     }
 }
 
-pub struct Instance {
-    pub position: Vec3,
-    pub rotation: Quat,
+pub trait Vertex {
+    fn desc() -> wgpu::VertexBufferLayout<'static>;
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, Zeroable, Pod)]
-pub struct InstanceRaw {
-    model: [[f32; 4]; 4],
-    normal: [[f32; 3]; 3],
-}
-
-impl Instance {
-    pub fn to_raw(&self) -> InstanceRaw {
-        let model = Mat4::from_translation(self.position) * Mat4::from_quat(self.rotation);
-        InstanceRaw {
-            model: model.to_cols_array_2d(),
-            normal: Mat3::from_quat(self.rotation).to_cols_array_2d(),
+impl Vertex for ModelVertex {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 5]>() as wgpu::BufferAddress,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 11]>() as wgpu::BufferAddress,
+                    shader_location: 4,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+            ],
         }
     }
 }
