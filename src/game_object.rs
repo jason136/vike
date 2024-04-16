@@ -7,21 +7,30 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
 use std::collections::btree_map::{Iter, IterMut};
 use std::collections::{BTreeMap, HashMap};
-use std::ops::Range;
+use std::ops::{Add, Range};
 use std::sync::Arc;
 
 pub struct GameObjectStore {
     objects: BTreeMap<String, GameObject>,
-    models: HashMap<String, Arc<Model>>,
     lights: BTreeMap<String, GameLight>,
+    models: HashMap<String, Arc<Model>>,
     models_to_objects: BTreeMap<String, Vec<String>>,
     models_to_lights: BTreeMap<String, Vec<String>>,
+    targets_to_arrays: HashMap<String, BTreeMap<String, Array>>,
 }
 
-pub struct GameObjectInstances {
+pub struct PreFrameData {
+    pub light_uniform: LightUniform,
     pub objects: Vec<(Arc<Model>, Range<u32>)>,
     pub lights: Vec<(Arc<Model>, Range<u32>)>,
     pub instances: Vec<InstanceRaw>,
+}
+
+pub struct Array {
+    pub target: String,
+    pub name: String,
+    pub offset: Box<dyn Fn(u32) -> Transform3D>,
+    pub num_instances: u32,
 }
 
 impl GameObjectStore {
@@ -32,6 +41,7 @@ impl GameObjectStore {
             lights: BTreeMap::new(),
             models_to_objects: BTreeMap::new(),
             models_to_lights: BTreeMap::new(),
+            targets_to_arrays: HashMap::new(),
         }
     }
 
@@ -52,18 +62,15 @@ impl GameObjectStore {
         model: Option<Arc<Model>>,
     ) {
         let obj = GameObject {
+            name: name.to_string(),
             transform,
             model: model.clone(),
         };
 
         self.objects.insert(name.to_string(), obj);
         if let Some(model) = model {
-            if let Some(vec) = self.models_to_objects.get_mut(&model.name) {
-                vec.push(name.to_string());
-            } else {
-                self.models_to_objects
-                    .insert(model.name.clone(), vec![name.to_string()]);
-            }
+            let vec = self.models_to_objects.entry(model.name.clone());
+            vec.or_default().push(name.to_string());
         }
     }
 
@@ -76,6 +83,7 @@ impl GameObjectStore {
         intensity: f32,
     ) {
         let light = GameLight {
+            name: name.to_string(),
             transform,
             model: model.clone(),
             color,
@@ -84,13 +92,27 @@ impl GameObjectStore {
 
         self.lights.insert(name.to_string(), light);
         if let Some(model) = model {
-            if let Some(vec) = self.models_to_lights.get_mut(&model.name) {
-                vec.push(name.to_string());
-            } else {
-                self.models_to_lights
-                    .insert(model.name.clone(), vec![name.to_string()]);
-            }
+            let vec = self.models_to_lights.entry(model.name.clone());
+            vec.or_default().push(name.to_string());
         }
+    }
+
+    pub fn new_array<F: Fn(u32) -> Transform3D + 'static>(
+        &mut self,
+        target: &str,
+        name: &str,
+        num_instances: u32,
+        offset: F,
+    ) {
+        let array = Array {
+            name: name.to_string(),
+            target: target.to_string(),
+            offset: Box::new(offset),
+            num_instances,
+        };
+
+        let vec = self.targets_to_arrays.entry(target.to_string());
+        vec.or_default().insert(name.to_string(), array);
     }
 
     pub fn delete_object(&mut self, name: &str) -> Option<GameObject> {
@@ -121,47 +143,72 @@ impl GameObjectStore {
         Some(light)
     }
 
-    pub fn light_uniform(&self) -> LightUniform {
-        let mut light_uniform = LightUniform::new();
-        for (index, light) in self.lights.values().enumerate() {
-            if index >= MAX_LIGHTS {
-                break;
-            }
-            light_uniform.lights[index] = Light {
-                position: light.transform.position.into(),
-                color: light.color.into(),
-                intensity: light.intensity,
-                _padding: 0,
-            };
+    pub fn delete_array(&mut self, target: &str, name: &str) -> Option<Array> {
+        let map = self.targets_to_arrays.get_mut(target)?;
+        let array = map.remove(name)?;
+        if map.is_empty() {
+            self.targets_to_arrays.remove(target)?;
         }
-
-        light_uniform.num_lights = std::cmp::max(self.lights.len(), MAX_LIGHTS) as u32;
-        light_uniform
+        Some(array)
     }
 
-    pub fn instances(&self) -> GameObjectInstances {
+    fn eval_array(&self, target: &str, transform: Transform3D) -> Vec<Transform3D> {
+        let mut out = Vec::new();
+        if let Some(map) = self.targets_to_arrays.get(target) {
+            for array in map.values() {
+                for i in 0..array.num_instances {
+                    let offset = (*array.offset)(i);
+                    let new_transform = &transform + &offset;
+                    out.push(new_transform);
+                }
+            }
+        } else {
+            out.push(transform);
+        }
+
+        out
+    }
+
+    pub fn pre_frame(&self) -> PreFrameData {
+        let mut light_uniform = LightUniform::new();
+        let mut index = 0;
+        for light in self.lights.values() {
+            for transform in self.eval_array(&light.name, light.transform.clone()) {
+                if index >= MAX_LIGHTS {
+                    break;
+                }
+                light_uniform.lights[index] = Light {
+                    position: transform.position.into(),
+                    color: light.color.into(),
+                    intensity: light.intensity,
+                    _padding: 0,
+                };
+                index += 1;
+            }
+        }
+
+        light_uniform.num_lights = std::cmp::max(index + 1, MAX_LIGHTS) as u32;
+
         let mut instances = Vec::new();
         let mut object_models = Vec::new();
         let mut light_models = Vec::new();
 
         let (mut start, mut end) = (0, 0);
-        let mut curr_model = Arc::new(Model {
-            name: "".to_string(),
-            meshes: Vec::new(),
-            materials: Vec::new(),
-        });
+        let mut curr_model = Arc::new(Model::default());
         for (model_name, object_names) in &self.models_to_objects {
             for object_name in object_names {
                 let object = self.objects.get(object_name).unwrap();
-                instances.push(object.transform.to_raw_instance());
-                if &curr_model.name == model_name {
-                    end += 1;
-                } else {
-                    if start != end {
-                        object_models.push((curr_model, start..end));
+                for transform in self.eval_array(object_name, object.transform.clone()) {
+                    instances.push(transform.to_raw_instance());
+                    if &curr_model.name == model_name {
+                        end += 1;
+                    } else {
+                        if start != end {
+                            object_models.push((curr_model, start..end));
+                        }
+                        curr_model = self.models.get(model_name).unwrap().clone();
+                        (start, end) = (end, end + 1);
                     }
-                    curr_model = self.models.get(model_name).unwrap().clone();
-                    (start, end) = (end, end + 1);
                 }
             }
         }
@@ -170,23 +217,26 @@ impl GameObjectStore {
         for (model_name, light_names) in &self.models_to_lights {
             for light_name in light_names {
                 let light = self.lights.get(light_name).unwrap();
-                let mut instance = light.transform.to_raw_instance();
-                instance.normal[0] = light.color.into();
-                instances.push(instance);
-                if &curr_model.name == model_name {
-                    end += 1;
-                } else {
-                    if start != end {
-                        light_models.push((curr_model, start..end));
+                for transform in self.eval_array(light_name, light.transform.clone()) {
+                    let mut instance = transform.to_raw_instance();
+                    instance.normal[0] = light.color.into();
+                    instances.push(instance);
+                    if &curr_model.name == model_name {
+                        end += 1;
+                    } else {
+                        if start != end {
+                            light_models.push((curr_model, start..end));
+                        }
+                        curr_model = self.models.get(model_name).unwrap().clone();
+                        (start, end) = (end, end + 1);
                     }
-                    curr_model = self.models.get(model_name).unwrap().clone();
-                    (start, end) = (end, end + 1);
                 }
             }
         }
         light_models.push((curr_model.clone(), start..end));
 
-        GameObjectInstances {
+        PreFrameData {
+            light_uniform,
             objects: object_models,
             lights: light_models,
             instances,
@@ -219,11 +269,13 @@ impl GameObjectStore {
 }
 
 pub struct GameObject {
+    pub name: String,
     pub transform: Transform3D,
     pub model: Option<Arc<Model>>,
 }
 
 pub struct GameLight {
+    pub name: String,
     pub transform: Transform3D,
     pub model: Option<Arc<Model>>,
     pub color: Vec3,
@@ -332,6 +384,22 @@ impl Default for Transform3D {
     }
 }
 
+impl<'a, 'b> Add<&'b Transform3D> for &'a Transform3D {
+    type Output = Transform3D;
+
+    fn add(self, other: &'b Transform3D) -> Transform3D {
+        Transform3D {
+            position: self.position + other.position,
+            rotation: self.rotation + other.rotation,
+            scale: Vec3::new(
+                self.scale.x * other.scale.x,
+                self.scale.y * other.scale.y,
+                self.scale.z * other.scale.z,
+            ),
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct ModelVertex {
@@ -391,6 +459,7 @@ pub struct Mesh {
     pub material: usize,
 }
 
+#[derive(Default)]
 pub struct Model {
     pub name: String,
     pub meshes: Vec<Mesh>,

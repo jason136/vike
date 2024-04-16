@@ -90,7 +90,7 @@ impl Renderer {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode: wgpu::PresentMode::AutoVsync,
             desired_maximum_frame_latency: 2,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
@@ -150,7 +150,7 @@ impl Renderer {
             config.height,
             45.0_f32.to_radians(),
             0.1,
-            100.0,
+            1000000.0,
         );
 
         let mut camera_uniform = CameraUniform::new();
@@ -381,11 +381,12 @@ impl Renderer {
     }
 
     pub fn render(&mut self, game_objects: &GameObjectStore) -> Result<(), wgpu::SurfaceError> {
-        let light_uniform = game_objects.light_uniform();
+        let pre_frame_data = game_objects.pre_frame();
+
         self.queue.write_buffer(
             &self.light_buffer,
             0,
-            bytemuck::cast_slice(&[light_uniform]),
+            bytemuck::cast_slice(&[pre_frame_data.light_uniform]),
         );
 
         self.camera_uniform
@@ -396,12 +397,10 @@ impl Renderer {
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
-        let game_object_instances = game_objects.instances();
-
         self.queue.write_buffer(
             &self.instance_buffer,
             0,
-            bytemuck::cast_slice(&game_object_instances.instances),
+            bytemuck::cast_slice(&pre_frame_data.instances),
         );
 
         let output = self.surface.get_current_texture()?;
@@ -446,7 +445,7 @@ impl Renderer {
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
             render_pass.set_pipeline(&self.render_pipeline);
-            for (model, range) in &game_object_instances.objects {
+            for (model, range) in &pre_frame_data.objects {
                 render_pass.draw_model_instanced(
                     model,
                     range.clone(),
@@ -456,7 +455,7 @@ impl Renderer {
             }
 
             render_pass.set_pipeline(&self.light_render_pipeline);
-            for (model, range) in &game_object_instances.lights {
+            for (model, range) in &pre_frame_data.lights {
                 render_pass.draw_light_model_instanced(
                     model,
                     range.clone(),

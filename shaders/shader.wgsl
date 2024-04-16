@@ -42,9 +42,10 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) tex_coords: vec2<f32>,
-    @location(2) tangent_position: vec3<f32>,
-    @location(3) tangent_view_position: vec3<f32>,
-    @location(4) tangent_light_position: vec3<f32>,
+    @location(2) tangent_view_position: vec3<f32>,
+    @location(3) world_tangent: vec3<f32>,
+    @location(4) world_bitangent: vec3<f32>,
+    @location(5) world_normal: vec3<f32>,
  }
 
 @vertex
@@ -76,12 +77,13 @@ fn vs_main(
     let world_position = model_matrix * vec4<f32>(model.position, 1.0);
 
     var out: VertexOutput;
-    out.world_position = world_position.xyz;
     out.clip_position = camera.view_proj * world_position;
+    out.world_position = world_position.xyz;
     out.tex_coords = model.tex_coords;
-    out.tangent_position = tangent_matrix * world_position.xyz;
     out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
-    out.tangent_light_position = tangent_matrix * lights.lights[0].position;
+    out.world_tangent = world_tangent;
+    out.world_bitangent = world_bitangent;
+    out.world_normal = world_normal;
     return out;
 }
 
@@ -99,24 +101,32 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, in.tex_coords);
     let object_normal: vec4<f32> = textureSample(t_normal, s_normal, in.tex_coords);
 
+    let tangent_matrix = transpose(mat3x3<f32>(
+        in.world_tangent,
+        in.world_bitangent,
+        in.world_normal,
+    ));
+
     var result: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
     for (var i: u32 = 0; i < lights.numLights; i = i + 1) {
         let light = lights.lights[i];
         let light_distance = length(in.world_position - light.position);
         let light_intensity = clamp(light.intensity / (light_distance * light_distance), 0.01, 10.0);
 
-        let ambient_strength = 0.001;
+        let ambient_strength = 0.01 / f32(lights.numLights);
         let ambient_color = light.color * ambient_strength;
 
         let tangent_normal = object_normal.xyz * 2.0 - 1.0;
-        let light_dir = normalize(in.tangent_light_position - in.tangent_position); // this should be in tangent space
-        let view_dir = normalize(in.tangent_view_position - in.tangent_position);
+        let tangent_light_position = tangent_matrix * lights.lights[i].position;
+        let tangent_position = tangent_matrix * in.world_position;
+        let light_dir = normalize(tangent_light_position - tangent_position);
+        let view_dir = normalize(in.tangent_view_position - tangent_position);
         let half_dir = normalize(view_dir + light_dir);
 
         let diffuse_strength = max(dot(tangent_normal, light_dir), 0.0);
         let diffuse_color = light.color * diffuse_strength * light_intensity;
 
-        let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 24.0);
+        let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 16.0);
         let specular_color = light.color * specular_strength * light_intensity;
 
         result = result + (ambient_color + diffuse_color + specular_color) * object_color.xyz;

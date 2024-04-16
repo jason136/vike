@@ -6,10 +6,12 @@ mod renderer;
 mod resources;
 mod texture;
 
+use std::f32::consts::PI;
+
 use anyhow::Result;
 use game_object::{GameObjectStore, Transform3D};
 use glam::{Quat, Vec3};
-use instant::Duration;
+use instant::{Duration, Instant};
 use renderer::Renderer;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, MouseButton};
@@ -27,7 +29,7 @@ use wasm_bindgen::prelude::*;
 use crate::camera::CameraController;
 
 const MAX_LIGHTS: usize = 128;
-const MAX_INSTANCES: usize = 1024;
+const MAX_INSTANCES: usize = 131072;
 
 async fn create_game_objects(renderer: &Renderer) -> Result<GameObjectStore> {
     let mut game_objects = GameObjectStore::new();
@@ -41,108 +43,119 @@ async fn create_game_objects(renderer: &Renderer) -> Result<GameObjectStore> {
     game_objects.new_game_object(
         "cube",
         Transform3D {
-            position: Vec3::new(-0.5, 0.5, 0.0),
-            scale: Vec3::new(2.0, 2.0, 2.0),
+            position: Vec3::new(0.0, 0.0, 0.0),
+            scale: Vec3::new(1.0, 1.0, 1.0),
             ..Default::default()
         },
         Some(cube_model.clone()),
     );
+    game_objects.new_array(
+        "cube",
+        "cube array",
+        100,
+        Box::new(|i: u32| {
+            let z = i / 10;
+            let x = i % 10;
+            let x = 3.0 * (x as f32 - 10_f32 / 2.0);
+            let z = 3.0 * (z as f32 - 10_f32 / 2.0);
+            let position = Vec3::new(x, 0.0, z);
 
-    // game_objects.new_game_object(
-    //     "cube",
-    //     Transform3D {
-    //         position: Vec3::new(-0.5, 5.0, 0.0),
-    //         scale: Vec3::new(2.0, 2.0, 2.0),
-    //         ..Default::default()
-    //     },
-    //     Some(cube_model.clone()),
-    // );
+            let rotation = if position == Vec3::ZERO {
+                Quat::from_axis_angle(Vec3::Z, 0.0)
+            } else {
+                Quat::from_axis_angle(position.normalize(), 45.0)
+            };
 
-    // let mut game_object = GameObject::new(Some(cube_model.clone()));
-    // game_object.transform.translation = [0.5, 0.5, 0.0].into();
-    // game_object.transform.scale = [2.0; 3].into();
-    // game_objects.insert(game_object.id, game_object);
+            Transform3D {
+                position,
+                rotation: rotation.to_euler(glam::EulerRot::XYZ).into(),
+                ..Default::default()
+            }
+        }),
+    );
+    game_objects.new_array(
+        "cube",
+        "cube spiral",
+        10000,
+        Box::new(|i: u32| {
+            let position =
+                    Quat::from_axis_angle(Vec3::Y, i as f32 * 0.25) * Vec3::new(10.0, 0.0, 10.0);
 
-    // let mut game_object = GameObject::new(Some(floor_model.clone()));
-    // game_object.transform.translation = [0.0, 0.5, 0.0].into();
-    // game_object.transform.scale = [3.0, 1.0, 3.0].into();
-    // game_objects.insert(game_object.id, game_object);
-
-    // let light_colors = [
-    //     Vector3::new(1.0, 0.1, 0.1),
-    //     Vector3::new(0.1, 0.1, 1.0),
-    //     Vector3::new(0.1, 1.0, 0.1),
-    //     Vector3::new(1.0, 1.0, 0.1),
-    //     Vector3::new(0.1, 1.0, 1.0),
-    //     Vector3::new(1.0, 1.0, 1.0),
-    // ];
+            Transform3D {
+                position: position + Vec3::new(0.0, i as f32 * 0.25, 0.0),
+                ..Default::default()
+            }
+        }),
+    );
 
     game_objects.new_light(
         "red",
         Transform3D {
-            position: Vec3::new(5.0, 2.0, 5.0),
+            position: Vec3::new(0.0, 2.0, 64.0),
+            scale: Vec3::new(0.25, 0.25, 0.25),
             ..Default::default()
         },
         Some(cube_model.clone()),
         Vec3::new(1.0, 0.0, 0.0),
-        50.0,
+        1000.0,
+    );
+    game_objects.new_array(
+        "red",
+        "red",
+        42,
+        Box::new(|i: u32| {
+            Transform3D {
+                position: Vec3::new(0.0, 20.0 * i as f32, 0.0),
+                ..Default::default()
+            }
+        }),
     );
 
     game_objects.new_light(
         "green",
         Transform3D {
-            position: Vec3::new(-5.0, 2.0, 5.0),
+            position: Vec3::new((2.0 * PI / 3.0).sin() * 64.0, 2.0, (2.0 * PI / 3.0).cos() * 64.0),
+            scale: Vec3::new(0.25, 0.25, 0.25),
             ..Default::default()
         },
         Some(cube_model.clone()),
         Vec3::new(0.0, 1.0, 0.0),
-        50.0,
+        1000.0,
+    );
+    game_objects.new_array(
+        "green",
+        "green",
+        42,
+        Box::new(|i: u32| {
+            Transform3D {
+                position: Vec3::new(0.0, 20.0 * i as f32, 0.0),
+                ..Default::default()
+            }
+        }),
     );
 
     game_objects.new_light(
         "blue",
         Transform3D {
-            position: Vec3::new(5.0, 2.0, -5.0),
+            position: Vec3::new((4.0 * PI / 3.0).sin() * 64.0, 2.0, (4.0 * PI / 3.0).cos() * 64.0),
+            scale: Vec3::new(0.25, 0.25, 0.25),
             ..Default::default()
         },
         Some(cube_model.clone()),
         Vec3::new(0.0, 0.0, 1.0),
-        50.0,
+        1000.0,
     );
-
-    // game_objects.new_light(
-    //     "main",
-    //     Transform3D {
-    //         position: Vec3::new(-5.0, 2.0, -5.0),
-    //         ..Default::default()
-    //     },
-    //     Some(cube_model.clone()),
-    //     Vec3::new(0.0, 0.0, 1.0),
-    //     10.0,
-    // );
-
-    // for i in 0..light_colors.len() {
-    //     let mut point_light = GameObject::new_point_light(0.5, 0.1, light_colors[i]);
-
-    //     let rotation = Rotation3::from_axis_angle(
-    //         &Vector3::y_axis(),
-    //         i as f32 * std::f32::consts::PI * 2.0 / light_colors.len() as f32,
-    //     );
-
-    //     point_light.transform.translation = rotation * Vector3::new(-1.0, -1.0, -1.0);
-
-    //     game_objects.insert(point_light.id, point_light);
-    // }
-
-    // for i in 0..1000 {
-    //     let mut game_object = GameObject::new(Some(basemesh_model.clone()));
-    //     game_object.transform.translation = [0.0, 0.0, 0.0].into();
-    //     // game_object.transform.rotation = [std::f32::consts::PI, 0.0, 0.0].into();
-    //     // game_object.transform.scale = [0.1; 3].into();
-
-    //     game_object.transform.rotation.y += i as f32 * 0.01;
-    //     game_objects.insert(game_object.id, game_object);
-    // }
+    game_objects.new_array(
+        "blue",
+        "blue",
+        42,
+        Box::new(|i: u32| {
+            Transform3D {
+                position: Vec3::new(0.0, 20.0 * i as f32, 0.0),
+                ..Default::default()
+            }
+        }),
+    );
 
     // models.insert("basemesh", basemesh_model);
     // models.insert("smooth_vase", smooth_vase_model);
@@ -157,29 +170,8 @@ fn animate_game_objects(game_objects: &mut GameObjectStore, dt: Duration) {
 
     for (_, light) in game_objects.lights_mut() {
         light.transform.position =
-            Quat::from_axis_angle(Vec3::Y, dt_secs) * light.transform.position;
+            Quat::from_axis_angle(Vec3::Y, dt_secs * 0.5) * light.transform.position;
     }
-
-    // for obj in game_objects.values_mut() {
-    //     match obj.obj {
-    //         GameObjectType::PointLight { .. } => {
-    //             let rotation = Mat3::from_axis_angle(Vec3::Y, dt_secs);
-    //             obj.transform.translation = rotation * obj.transform.translation;
-    //         }
-    //         GameObjectType::Model { .. } => {
-    //             let rotation = Mat3::from_axis_angle(Vec3::Y, dt_secs * 0.01);
-
-    //             obj.transform.translation = rotation * obj.transform.translation;
-    //             obj.transform.rotation.y += dt_secs * 0.1;
-    //         }
-    //     }
-    // }
-
-    // let mut game_object = GameObject::new(Some(models["basemesh"].clone()));
-    // game_object.transform.translation = [4.0, -1.0, 0.0].into();
-    // game_object.transform.rotation = [std::f32::consts::PI, 0.0, 0.0].into();
-    // game_object.transform.scale = [0.1; 3].into();
-    // game_objects.insert(game_object.id, game_object);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
@@ -227,7 +219,7 @@ pub async fn run() {
     let mut camera_controller = CameraController::new(4.0, 0.6);
     let mut focused = true;
 
-    let mut last_render_time = instant::Instant::now();
+    let mut last_instant = Instant::now();
 
     event_loop
         .run(move |event, elwt| match event {
@@ -239,9 +231,9 @@ pub async fn run() {
                 ref event,
             } if window_id == renderer.window().id() && !renderer.input(event) => match event {
                 WindowEvent::RedrawRequested => {
-                    let now = instant::Instant::now();
-                    let dt = now - last_render_time;
-                    last_render_time = now;
+                    let now = Instant::now();
+                    let dt = now - last_instant;
+                    last_instant = now;
 
                     animate_game_objects(&mut game_objects, dt);
                     camera_controller.update_camera(&mut renderer.camera, dt);

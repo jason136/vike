@@ -74,6 +74,7 @@ pub struct CameraController {
     rotate_horizontal: f32,
     rotate_vertical: f32,
     scroll: f32,
+    sprint: bool,
     speed: f32,
     sensitivity: f32,
 }
@@ -90,6 +91,7 @@ impl CameraController {
             rotate_horizontal: 0.0,
             rotate_vertical: 0.0,
             scroll: 0.0,
+            sprint: false,
             speed,
             sensitivity,
         }
@@ -114,11 +116,14 @@ impl CameraController {
             KeyCode::KeyD | KeyCode::ArrowRight => {
                 self.amount_right = amount;
             }
+            KeyCode::KeyC => {
+                self.amount_down = amount;
+            }
             KeyCode::Space => {
                 self.amount_up = amount;
             }
             KeyCode::ShiftLeft => {
-                self.amount_down = amount;
+                self.sprint = state == ElementState::Pressed;
             }
             _ => {}
         }
@@ -138,19 +143,24 @@ impl CameraController {
 
     pub fn update_camera(&mut self, camera: &mut Camera, dt: Duration) {
         let dt = dt.as_secs_f32();
+        let speed = if self.sprint {
+            self.speed * 2.0
+        } else {
+            self.speed
+        };
 
         let (yaw_sin, yaw_cos) = camera.yaw.sin_cos();
         let forward = Vec3::new(yaw_cos, 0.0, yaw_sin).normalize();
         let right = Vec3::new(-yaw_sin, 0.0, yaw_cos).normalize();
-        camera.position += forward * (self.amount_forward - self.amount_backward) * self.speed * dt;
-        camera.position += right * (self.amount_right - self.amount_left) * self.speed * dt;
+        camera.position += forward * (self.amount_forward - self.amount_backward) * speed * dt;
+        camera.position += right * (self.amount_right - self.amount_left) * speed * dt;
 
         let (pitch_sin, pitch_cos) = camera.pitch.sin_cos();
         let scrollward = Vec3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
-        camera.position += scrollward * self.scroll * self.speed * self.sensitivity * dt;
+        camera.position += scrollward * self.scroll * speed * self.sensitivity * dt;
         self.scroll = 0.0;
 
-        camera.position.y += (self.amount_up - self.amount_down) * self.speed * dt;
+        camera.position.y += (self.amount_up - self.amount_down) * speed * dt;
 
         camera.yaw += self.rotate_horizontal * self.sensitivity * dt;
         camera.pitch -= self.rotate_vertical * self.sensitivity * dt;
