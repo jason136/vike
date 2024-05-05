@@ -29,7 +29,7 @@ pub struct PreFrameData {
 pub struct Array {
     pub target: String,
     pub name: String,
-    pub offset: Box<dyn Fn(u32) -> Transform3D>,
+    pub offset: Box<dyn Fn(u32) -> Transform3D + Send>,
     pub num_instances: u32,
 }
 
@@ -97,7 +97,7 @@ impl GameObjectStore {
         }
     }
 
-    pub fn new_array<F: Fn(u32) -> Transform3D + 'static>(
+    pub fn new_array<F: Fn(u32) -> Transform3D + 'static + Send>(
         &mut self,
         target: &str,
         name: &str,
@@ -354,19 +354,6 @@ impl Transform3D {
     }
 
     pub fn to_raw_instance(&self) -> InstanceRaw {
-        // let rotation = Quat::from_euler(
-        //     glam::EulerRot::XYZ,
-        //     self.rotation.x,
-        //     self.rotation.y,
-        //     self.rotation.z,
-        // );
-        // let model = Mat4::from_scale(self.scale)
-        //     * Mat4::from_translation(self.position)
-        //     * Mat4::from_quat(rotation);
-        // InstanceRaw {
-        //     model: model.to_cols_array_2d(),
-        //     normal: Mat3::from_quat(rotation).to_cols_array_2d(),
-        // }
         InstanceRaw {
             model: self.model().to_cols_array_2d(),
             normal: self.normal().to_cols_array_2d(),

@@ -35,6 +35,3 @@ wgpu = { version = "0.19", features = ["webgl"] }
 [lib]
 crate-type = ["cdylib", "rlib"]
 required-features = []
-
-[profile.release]
-lto = true

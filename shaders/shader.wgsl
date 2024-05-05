@@ -43,9 +43,9 @@ struct VertexOutput {
     @location(0) world_position: vec3<f32>,
     @location(1) tex_coords: vec2<f32>,
     @location(2) tangent_view_position: vec3<f32>,
-    @location(3) world_tangent: vec3<f32>,
-    @location(4) world_bitangent: vec3<f32>,
-    @location(5) world_normal: vec3<f32>,
+    @location(3) world_normal: vec3<f32>,
+    @location(4) world_tangent: vec3<f32>,
+    @location(5) world_bitangent: vec3<f32>,
  }
 
 @vertex
@@ -81,9 +81,9 @@ fn vs_main(
     out.world_position = world_position.xyz;
     out.tex_coords = model.tex_coords;
     out.tangent_view_position = tangent_matrix * camera.view_pos.xyz;
+    out.world_normal = world_normal;
     out.world_tangent = world_tangent;
     out.world_bitangent = world_bitangent;
-    out.world_normal = world_normal;
     return out;
 }
 
