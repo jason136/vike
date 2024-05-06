@@ -1,4 +1,4 @@
-use anyhow::*;
+use anyhow::Result;
 use cfg_if::cfg_if;
 use glam::{Vec2, Vec3};
 use std::io::{BufReader, Cursor};
@@ -10,63 +10,42 @@ use crate::{
     texture::Texture,
 };
 
-pub async fn load_texture(
+pub fn load_texture(
     filename: &str,
     is_normal_map: bool,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Result<Texture> {
-    let data = load_binary(filename).await?;
-    Texture::from_bytes(device, queue, &data, filename, is_normal_map)
+    let data = load_binary(filename)?;
+    Texture::from_bytes(&data, filename, is_normal_map, device, queue)
 }
 
-pub async fn load_model(filename: &str, renderer: &Renderer) -> anyhow::Result<Model> {
-    let obj_text = load_string(filename).await?;
+pub fn load_model(filename: &str, renderer: &Renderer) -> Result<Model> {
+    let obj_text = load_string(filename)?;
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
-    let (models, obj_materials) = tobj::load_obj_buf_async(
+    let (models, obj_materials) = tobj::load_obj_buf(
         &mut obj_reader,
         &tobj::LoadOptions {
             triangulate: true,
             single_index: true,
             ..Default::default()
         },
-        |p| async move {
-            let mat_text = load_string(&p)
-                .await
-                .unwrap_or_else(|_| panic!("Failed to load material {:?}", p));
-            tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
+        |p| {
+            if let Some(mat_text) = p
+                .to_str()
+                .as_ref()
+                .and_then(|filename| load_string(filename).ok())
+            {
+                tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
+            } else {
+                Ok(Default::default())
+            }
         },
-    )
-    .await?;
+    )?;
 
-    let mut materials = Vec::new();
-    for m in obj_materials? {
-        let diffuse_texture = load_texture(
-            &m.diffuse_texture.unwrap(),
-            false,
-            renderer.device(),
-            renderer.queue(),
-        )
-        .await?;
-        let normal_texture = load_texture(
-            &m.normal_texture.unwrap(),
-            true,
-            renderer.device(),
-            renderer.queue(),
-        )
-        .await?;
-
-        materials.push(Material::new(
-            renderer.device(),
-            &m.name,
-            diffuse_texture,
-            normal_texture,
-            renderer.texture_bind_group_layout(),
-        ));
-    }
-
+    let mut max_mat_id = 0;
     let meshes = models
         .into_iter()
         .map(|m| {
@@ -155,64 +134,98 @@ pub async fn load_model(filename: &str, renderer: &Renderer) -> anyhow::Result<M
                         contents: bytemuck::cast_slice(&m.mesh.indices),
                         usage: wgpu::BufferUsages::INDEX,
                     });
+            let material_id = std::cmp::max(max_mat_id, m.mesh.material_id.unwrap_or(0));
+            max_mat_id = material_id;
 
             Mesh::new(
                 filename,
                 vertex_buffer,
                 index_buffer,
                 m.mesh.indices.len() as u32,
-                m.mesh.material_id.unwrap_or(0),
+                material_id,
             )
         })
         .collect();
 
+    let mut materials = Vec::new();
+    for m in obj_materials? {
+        let diffuse_texture = m
+            .diffuse_texture
+            .as_ref()
+            .and_then(|filename| {
+                load_texture(filename, false, renderer.device(), renderer.queue()).ok()
+            })
+            .unwrap_or_else(|| {
+                Texture::default(false, renderer.device(), renderer.queue()).unwrap()
+            });
+
+        let normal_texture = m
+            .normal_texture
+            .as_ref()
+            .and_then(|filename| {
+                load_texture(filename, true, renderer.device(), renderer.queue()).ok()
+            })
+            .unwrap_or_else(|| {
+                Texture::default(true, renderer.device(), renderer.queue()).unwrap()
+            });
+
+        materials.push(Material::new(
+            renderer.device(),
+            &m.name,
+            diffuse_texture,
+            normal_texture,
+            renderer.texture_bind_group_layout(),
+        ));
+    }
+
+    while materials.len() <= max_mat_id {
+        materials.push(Material::new(
+            renderer.device(),
+            "default",
+            Texture::default(false, renderer.device(), renderer.queue()).unwrap(),
+            Texture::default(true, renderer.device(), renderer.queue()).unwrap(),
+            renderer.texture_bind_group_layout(),
+        ));
+    }
+
     Ok(Model::new(filename, meshes, materials))
 }
 
-#[cfg(target_arch = "wasm32")]
-fn format_url(filename: &str) -> reqwest::Url {
-    let window = web_sys::window().unwrap();
-    let location = window.location();
-    let origin = location.origin().unwrap();
-    let base = reqwest::Url::parse(&format!("{}/", origin)).unwrap();
-    base.join(filename).unwrap()
-}
-
-pub async fn load_string(filename: &str) -> anyhow::Result<String> {
-    cfg_if! {
-        if #[cfg(target_arch = "wasm32")] {
-            let url = format_url(filename);
-            let txt = reqwest::get(url)
-                .await?
-                .text()
-                .await?;
-        } else {
-            let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
-                .join("models")
-                .join(filename);
-            let txt = std::fs::read_to_string(path)?;
-        }
-    }
+pub fn load_string(filename: &str) -> Result<String> {
+    // cfg_if! {
+    //     if #[cfg(target_arch = "wasm32")] {
+    //         let url = format_url(filename);
+    //         let txt = reqwest::get(url)
+    //             .await?
+    //             .text()
+    //             .await?;
+    //     } else {
+    let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
+        .join("models")
+        .join(filename);
+    let txt = std::fs::read_to_string(path)?;
+    //     }
+    // }
 
     Ok(txt)
 }
 
-pub async fn load_binary(filename: &str) -> anyhow::Result<Vec<u8>> {
-    cfg_if! {
-        if #[cfg(target_arch = "wasm32")] {
-            let url = format_url(filename);
-            let data = reqwest::get(url)
-                .await?
-                .bytes()
-                .await?
-                .to_vec();
-        } else {
-            let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
-                .join("models")
-                .join(filename);
-            let data = std::fs::read(path)?;
-        }
-    }
+pub fn load_binary(filename: &str) -> Result<Vec<u8>> {
+    // cfg_if! {
+    //     if #[cfg(target_arch = "wasm32")] {
+    //         let url = format_url(filename);
+    //         let data = reqwest::get(url)
+    //             .await?
+    //             .bytes()
+    //             .await?
+    //             .to_vec();
+    //     } else {
+    let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
+        .join("models")
+        .join(filename);
+    let data = std::fs::read(path)?;
+    //     }
+    // }
 
     Ok(data)
 }

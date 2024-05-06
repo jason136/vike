@@ -1,15 +1,23 @@
-#![feature(async_closure)]
-
 use std::f32::consts::PI;
 
 use glam::{Quat, Vec3};
 use vike::{
-    camera::CameraController, game_object::{self, GameObjectStore, Transform3D}, renderer::Renderer, run
+    camera::CameraController,
+    game_object::{GameObjectStore, Transform3D},
+    renderer::Renderer,
+    run,
 };
 
 fn main() {
-    async fn setup(game_objects: &mut GameObjectStore, camera_controller: &mut CameraController, renderer: &Renderer) {
-        let cube_model = game_objects.load_model("cube.obj", renderer).await.unwrap();
+    fn setup(
+        game_objects: &mut GameObjectStore,
+        camera_controller: &mut CameraController,
+        renderer: &Renderer,
+    ) {
+        camera_controller.sensitivity = 0.4;
+        camera_controller.speed = 6.0;
+
+        let cube_model = game_objects.load_model("cube.obj", renderer).unwrap();
 
         game_objects.new_game_object(
             "cube",
@@ -133,7 +141,9 @@ fn main() {
 
     pollster::block_on(run(
         "Vike",
-        |game_objects, camera_controller, renderer| Box::pin(setup(game_objects, camera_controller, renderer)),
+        |game_objects, camera_controller, renderer| {
+            setup(game_objects, camera_controller, renderer)
+        },
         |game_objects, _camera_controller, dt| {
             let dt_secs = dt.as_secs_f32();
 

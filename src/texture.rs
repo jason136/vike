@@ -1,5 +1,5 @@
-use anyhow::*;
-use image::GenericImageView;
+use anyhow::Result;
+use image::{GenericImageView, ImageBuffer};
 
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -8,23 +8,45 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn from_bytes(
+    pub fn default(
+        is_normal_map: bool,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+    ) -> Result<Self> {
+        let img = ImageBuffer::from_fn(256, 256, |_, _| {
+            if is_normal_map {
+                image::Rgb([128, 128, 255])
+            } else {
+                image::Rgb([128, 128, 128])
+            }
+        });
+
+        Self::from_image(
+            &image::DynamicImage::ImageRgb8(img),
+            Some("default"),
+            false,
+            device,
+            queue,
+        )
+    }
+
+    pub fn from_bytes(
         bytes: &[u8],
         label: &str,
         is_normal_map: bool,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
     ) -> Result<Self> {
         let img = image::load_from_memory(bytes)?;
-        Self::from_image(device, queue, &img, Some(label), is_normal_map)
+        Self::from_image(&img, Some(label), is_normal_map, device, queue)
     }
 
     pub fn from_image(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
         img: &image::DynamicImage,
         label: Option<&str>,
         is_normal_map: bool,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
     ) -> Result<Self> {
         let rgba = img.to_rgba8();
         let dimensions = img.dimensions();

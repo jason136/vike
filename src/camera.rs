@@ -75,8 +75,9 @@ pub struct CameraController {
     rotate_vertical: f32,
     scroll: f32,
     sprint: bool,
-    speed: f32,
-    sensitivity: f32,
+    pub speed: f32,
+    pub sensitivity: f32,
+    pub focused: bool,
 }
 
 impl CameraController {
@@ -94,6 +95,7 @@ impl CameraController {
             sprint: false,
             speed,
             sensitivity,
+            focused: true,
         }
     }
 
@@ -182,8 +184,8 @@ pub struct CameraUniform {
     inv_view: [[f32; 4]; 4],
 }
 
-impl CameraUniform {
-    pub fn new() -> Self {
+impl Default for CameraUniform {
+    fn default() -> Self {
         Self {
             view_position: [0.0; 4],
             view: Mat4::IDENTITY.to_cols_array_2d(),
@@ -192,7 +194,9 @@ impl CameraUniform {
             inv_view: Mat4::IDENTITY.to_cols_array_2d(),
         }
     }
+}
 
+impl CameraUniform {
     pub fn update_view_proj(&mut self, camera: &Camera, projection: &Projection) {
         self.view_position = camera.position.extend(1.0).into();
         let proj = projection.calc_matrix();

@@ -9,8 +9,6 @@ pub mod resources;
 pub mod texture;
 
 use std::borrow::BorrowMut;
-use std::future::Future;
-use std::pin::Pin;
 
 use game_object::GameObjectStore;
 use instant::{Duration, Instant};
@@ -35,11 +33,7 @@ const MAX_INSTANCES: usize = 131072;
 
 pub async fn run(
     title: &str,
-    mut setup_fn: impl for<'a> FnMut(
-        &'a mut GameObjectStore,
-        &'a mut CameraController,
-        &'a Renderer,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
+    setup_fn: impl for<'a> Fn(&'a mut GameObjectStore, &'a mut CameraController, &'a Renderer),
     update_fn: impl Fn(&mut GameObjectStore, &mut CameraController, Duration),
 ) {
     cfg_if::cfg_if! {
@@ -80,10 +74,9 @@ pub async fn run(
 
     let mut renderer = Renderer::new(window).await;
 
-    let mut game_objects = GameObjectStore::new();
+    let mut game_objects = GameObjectStore::default();
     let mut camera_controller = CameraController::new(4.0, 0.6);
-    (setup_fn)(&mut game_objects, &mut camera_controller, &renderer).await;
-    let mut focused = true;
+    (setup_fn)(&mut game_objects, &mut camera_controller, &renderer);
 
     let mut last_instant = Instant::now();
 
@@ -105,7 +98,7 @@ pub async fn run(
                         (update_fn)(&mut game_objects, &mut camera_controller, dt);
                         camera_controller.update_camera(&mut renderer.camera, dt);
 
-                        match renderer.render(&mut game_objects) {
+                        match renderer.render(&game_objects) {
                             Ok(_) => {}
                             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                                 renderer.resize(renderer.size())
@@ -118,12 +111,12 @@ pub async fn run(
                         if let PhysicalKey::Code(code) = event.physical_key {
                             match code {
                                 KeyCode::Escape => {
-                                    focused = false;
+                                    camera_controller.focused = false;
                                     renderer.window().set_cursor_visible(true);
                                     renderer
                                         .window()
                                         .set_cursor_grab(CursorGrabMode::None)
-                                        .unwrap();
+                                        .unwrap_or(());
                                 }
                                 _ => camera_controller.process_keyboard(code, event.state),
                             }
@@ -137,12 +130,12 @@ pub async fn run(
                         button: MouseButton::Left,
                         ..
                     } => {
-                        focused = true;
+                        camera_controller.focused = true;
                         renderer.window().set_cursor_visible(false);
                         renderer
                             .window()
                             .set_cursor_grab(CursorGrabMode::Locked)
-                            .unwrap();
+                            .unwrap_or(());
                     }
                     WindowEvent::Resized(physical_size) => {
                         renderer.resize(*physical_size);
@@ -151,18 +144,18 @@ pub async fn run(
                         renderer.resize(renderer.window().inner_size());
                     }
                     WindowEvent::Focused(focus) => {
-                        focused = *focus;
-                        renderer.window().set_cursor_visible(!focused);
-                        if focused {
+                        camera_controller.focused = *focus;
+                        renderer.window().set_cursor_visible(!camera_controller.focused);
+                        if camera_controller.focused {
                             renderer
                                 .window()
                                 .set_cursor_grab(CursorGrabMode::Locked)
-                                .unwrap();
+                                .unwrap_or(());
                         } else {
                             renderer
                                 .window()
                                 .set_cursor_grab(CursorGrabMode::None)
-                                .unwrap();
+                                .unwrap_or(());
                         }
                     }
                     #[cfg(not(target_arch = "wasm32"))]
@@ -176,7 +169,7 @@ pub async fn run(
                 event: DeviceEvent::MouseMotion { delta },
                 ..
             } => {
-                if focused {
+                if camera_controller.focused {
                     camera_controller.process_mouse(delta.0, delta.1);
                 }
             }

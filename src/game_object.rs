@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::{Add, Range};
 use std::sync::Arc;
 
+#[derive(Default)]
 pub struct GameObjectStore {
     objects: BTreeMap<String, GameObject>,
     lights: BTreeMap<String, GameLight>,
@@ -34,22 +35,11 @@ pub struct Array {
 }
 
 impl GameObjectStore {
-    pub fn new() -> Self {
-        Self {
-            objects: BTreeMap::new(),
-            models: HashMap::new(),
-            lights: BTreeMap::new(),
-            models_to_objects: BTreeMap::new(),
-            models_to_lights: BTreeMap::new(),
-            targets_to_arrays: HashMap::new(),
-        }
-    }
-
-    pub async fn load_model(&mut self, filename: &str, renderer: &Renderer) -> Result<Arc<Model>> {
+    pub fn load_model(&mut self, filename: &str, renderer: &Renderer) -> Result<Arc<Model>> {
         if let Some(model) = self.models.get(filename) {
             Ok(model.clone())
         } else {
-            let model = Arc::new(load_model(filename, renderer).await?);
+            let model = Arc::new(load_model(filename, renderer)?);
             self.models.insert(filename.to_string(), model.clone());
             Ok(model)
         }
@@ -118,8 +108,8 @@ impl GameObjectStore {
     pub fn delete_object(&mut self, name: &str) -> Option<GameObject> {
         let object = self.objects.remove(name)?;
         if let Some(model) = &object.model {
-            let vec = self.models_to_objects.get_mut(&model.name).unwrap();
-            let index = vec.iter().position(|x| *x == model.name).unwrap();
+            let vec = self.models_to_objects.get_mut(&model.name)?;
+            let index = vec.iter().position(|x| *x == model.name)?;
             vec.swap_remove(index);
             if vec.is_empty() {
                 self.models_to_objects.remove(&model.name);
@@ -132,8 +122,8 @@ impl GameObjectStore {
     pub fn delete_light(&mut self, name: &str) -> Option<GameLight> {
         let light = self.lights.remove(name)?;
         if let Some(model) = &light.model {
-            let vec = self.models_to_lights.get_mut(&model.name).unwrap();
-            let index = vec.iter().position(|x| *x == model.name).unwrap();
+            let vec = self.models_to_lights.get_mut(&model.name)?;
+            let index = vec.iter().position(|x| *x == model.name)?;
             vec.swap_remove(index);
             if vec.is_empty() {
                 self.models_to_lights.remove(&model.name);
@@ -170,7 +160,7 @@ impl GameObjectStore {
     }
 
     pub fn pre_frame(&self) -> PreFrameData {
-        let mut light_uniform = LightUniform::new();
+        let mut light_uniform = LightUniform::default();
         let mut index = 0;
         for light in self.lights.values() {
             for transform in self.eval_array(&light.name, light.transform.clone()) {
@@ -414,8 +404,8 @@ pub struct LightUniform {
     pub lights: [Light; MAX_LIGHTS],
 }
 
-impl LightUniform {
-    pub fn new() -> Self {
+impl Default for LightUniform {
+    fn default() -> Self {
         Self {
             num_lights: 0,
             _padding: [0; 3],
@@ -432,8 +422,8 @@ impl LightUniform {
 // #[allow(dead_code)]
 pub struct Material {
     pub name: String,
-    diffuse_texture: Texture,
-    normal_texture: Texture,
+    // diffuse_texture: Texture,
+    // normal_texture: Texture,
     bind_group: wgpu::BindGroup,
 }
 
@@ -504,8 +494,8 @@ impl Material {
 
         Self {
             name: String::from(name),
-            diffuse_texture,
-            normal_texture,
+            // diffuse_texture,
+            // normal_texture,
             bind_group,
         }
     }
