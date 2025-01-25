@@ -1,4 +1,6 @@
 #![feature(unboxed_closures)]
+#![feature(let_chains)]
+#![feature(type_alias_impl_trait)]
 
 pub mod camera;
 pub mod debug;
@@ -9,14 +11,16 @@ pub mod resources;
 pub mod texture;
 
 use std::borrow::BorrowMut;
+use std::sync::Arc;
 
 use game_object::GameObjectStore;
+use image::{ImageBuffer, Rgba};
 use instant::{Duration, Instant};
-use renderer::Renderer;
+use renderer::{RenderTarget, Renderer};
 use winit::dpi::LogicalSize;
-use winit::event::{DeviceEvent, MouseButton};
-use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::CursorGrabMode;
+use winit::event::DeviceEvent;
+use winit::event_loop::EventLoopWindowTarget;
+use winit::window::Window;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::EventLoop,
@@ -31,33 +35,42 @@ use crate::camera::CameraController;
 const MAX_LIGHTS: usize = 128;
 const MAX_INSTANCES: usize = 131072;
 
-pub async fn run(
-    title: &str,
-    setup_fn: impl for<'a> Fn(&'a mut GameObjectStore, &'a mut CameraController, &'a Renderer),
-    update_fn: impl Fn(&mut GameObjectStore, &mut CameraController, Duration),
-) {
-    cfg_if::cfg_if! {
-        if #[cfg(target_arch = "wasm32")] {
-            std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-            console_log::init_with_level(log::Level::Warn).expect("Couldn't initialize logger");
-        } else {
-            env_logger::init();
-        }
-    }
+pub enum RenderMode {
+    Window,
+    Headless,
+}
 
+pub async fn run_windowed(
+    title: &str,
+    width: u32,
+    height: u32,
+    setup_fn: impl Fn(&mut GameObjectStore, &mut CameraController, &Renderer),
+    update_fn: impl Fn(&mut GameObjectStore, &mut CameraController, Duration),
+    window_event_fn: impl Fn(
+        &Arc<Window>,
+        &mut GameObjectStore,
+        &mut CameraController,
+        &mut Renderer,
+        &WindowEvent,
+        &EventLoopWindowTarget<()>,
+    ),
+    device_event_fn: impl Fn(&mut GameObjectStore, &mut CameraController, DeviceEvent),
+) {
     let event_loop = EventLoop::new().unwrap();
-    let window = WindowBuilder::new()
-        .with_title(title)
-        .with_inner_size(LogicalSize::new(800.0, 600.0))
-        .with_resizable(true)
-        .build(&event_loop)
-        .unwrap();
+    let window = Arc::new(
+        WindowBuilder::new()
+            .with_title(title)
+            .with_inner_size(LogicalSize::new(width, height))
+            .with_resizable(true)
+            .build(&event_loop)
+            .unwrap(),
+    );
 
     #[cfg(target_arch = "wasm32")]
     {
         use winit::dpi::PhysicalSize;
         window
-            .request_inner_size(PhysicalSize::new(450, 400))
+            .request_inner_size(PhysicalSize::new(width, height))
             .unwrap();
 
         use winit::platform::web::WindowExtWebSys;
@@ -72,10 +85,11 @@ pub async fn run(
             .expect("Couldn't append canvas to document body.");
     }
 
-    let mut renderer = Renderer::new(window).await;
+    let mut renderer = Renderer::new(RenderTarget::Window(window.clone())).await;
 
     let mut game_objects = GameObjectStore::default();
     let mut camera_controller = CameraController::new(4.0, 0.6);
+
     (setup_fn)(&mut game_objects, &mut camera_controller, &renderer);
 
     let mut last_instant = Instant::now();
@@ -83,97 +97,73 @@ pub async fn run(
     event_loop
         .run(move |event, elwt| match event {
             Event::AboutToWait => {
-                renderer.window().request_redraw();
+                window.request_redraw();
             }
             Event::WindowEvent {
                 window_id,
                 ref event,
-            } if window_id == renderer.window().id() && !renderer.borrow_mut().input(event) => {
-                match event {
-                    WindowEvent::RedrawRequested => {
-                        let now = Instant::now();
-                        let dt = now - last_instant;
-                        last_instant = now;
+            } if window_id == window.id() && !renderer.borrow_mut().input(event) => match event {
+                WindowEvent::RedrawRequested => {
+                    let now = Instant::now();
+                    let dt = now - last_instant;
+                    last_instant = now;
 
-                        (update_fn)(&mut game_objects, &mut camera_controller, dt);
-                        camera_controller.update_camera(&mut renderer.camera, dt);
+                    (update_fn)(&mut game_objects, &mut camera_controller, dt);
+                    camera_controller.update_camera(&mut renderer.camera, dt);
 
-                        match renderer.render(&game_objects) {
-                            Ok(_) => {}
-                            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                                renderer.resize(renderer.size())
-                            }
-                            Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
-                            Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
+                    match renderer.render(&game_objects) {
+                        Ok(_) => {}
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            renderer.resize(window.inner_size());
                         }
+                        Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
+                        Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
                     }
-                    WindowEvent::KeyboardInput { event, .. } => {
-                        if let PhysicalKey::Code(code) = event.physical_key {
-                            match code {
-                                KeyCode::Escape => {
-                                    camera_controller.focused = false;
-                                    renderer.window().set_cursor_visible(true);
-                                    renderer
-                                        .window()
-                                        .set_cursor_grab(CursorGrabMode::None)
-                                        .unwrap_or(());
-                                }
-                                _ => camera_controller.process_keyboard(code, event.state),
-                            }
-                            camera_controller.process_keyboard(code, event.state);
-                        };
-                    }
-                    WindowEvent::MouseWheel { delta, .. } => {
-                        camera_controller.process_scroll(delta);
-                    }
-                    WindowEvent::MouseInput {
-                        button: MouseButton::Left,
-                        ..
-                    } => {
-                        camera_controller.focused = true;
-                        renderer.window().set_cursor_visible(false);
-                        renderer
-                            .window()
-                            .set_cursor_grab(CursorGrabMode::Locked)
-                            .unwrap_or(());
-                    }
-                    WindowEvent::Resized(physical_size) => {
-                        renderer.resize(*physical_size);
-                    }
-                    WindowEvent::ScaleFactorChanged { .. } => {
-                        renderer.resize(renderer.window().inner_size());
-                    }
-                    WindowEvent::Focused(focus) => {
-                        camera_controller.focused = *focus;
-                        renderer.window().set_cursor_visible(!camera_controller.focused);
-                        if camera_controller.focused {
-                            renderer
-                                .window()
-                                .set_cursor_grab(CursorGrabMode::Locked)
-                                .unwrap_or(());
-                        } else {
-                            renderer
-                                .window()
-                                .set_cursor_grab(CursorGrabMode::None)
-                                .unwrap_or(());
-                        }
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    WindowEvent::CloseRequested => {
-                        elwt.exit();
-                    }
-                    _ => (),
                 }
-            }
-            Event::DeviceEvent {
-                event: DeviceEvent::MouseMotion { delta },
-                ..
-            } => {
-                if camera_controller.focused {
-                    camera_controller.process_mouse(delta.0, delta.1);
-                }
+                _ => window_event_fn(
+                    &window,
+                    &mut game_objects,
+                    &mut camera_controller,
+                    &mut renderer,
+                    event,
+                    elwt,
+                ),
+            },
+            Event::DeviceEvent { event, .. } => {
+                device_event_fn(&mut game_objects, &mut camera_controller, event);
             }
             _ => (),
         })
         .unwrap();
+}
+
+pub async fn run_headless(
+    width: u32,
+    height: u32,
+    setup_fn: impl Fn(&mut GameObjectStore, &mut CameraController, &Renderer),
+    update_fn: impl Fn(&mut GameObjectStore, &mut CameraController, Duration),
+    frame_fn: impl Fn(ImageBuffer<Rgba<u8>, Vec<u8>>),
+) {
+    let mut renderer = Renderer::new(RenderTarget::Headless { width, height }).await;
+
+    let mut game_objects = GameObjectStore::default();
+    let mut camera_controller = CameraController::new(4.0, 0.6);
+
+    (setup_fn)(&mut game_objects, &mut camera_controller, &renderer);
+
+    let mut last_instant = Instant::now();
+
+    while renderer.render(&game_objects).is_ok() {
+        let now = Instant::now();
+        let dt = now - last_instant;
+        last_instant = now;
+
+        (update_fn)(&mut game_objects, &mut camera_controller, dt);
+
+        camera_controller.update_camera(&mut renderer.camera, dt);
+
+        renderer.render(&game_objects).unwrap();
+
+        (frame_fn)(renderer.image_buffer().await.unwrap());
+    }
 }

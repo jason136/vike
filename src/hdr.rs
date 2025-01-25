@@ -11,9 +11,12 @@ pub struct HdrPipeline {
 }
 
 impl HdrPipeline {
-    pub fn new(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> Self {
-        let width = config.width;
-        let height = config.height;
+    pub fn new(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        pipeline_format: wgpu::TextureFormat,
+    ) -> Self {
         let format = wgpu::TextureFormat::Rgba16Float;
 
         let texture = Texture::create_2d_texture(
@@ -72,7 +75,7 @@ impl HdrPipeline {
         let pipeline = Renderer::create_render_pipeline(
             device,
             &pipeline_layout,
-            config.format,
+            pipeline_format,
             None,
             &[],
             wgpu::PrimitiveTopology::TriangleList,

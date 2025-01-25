@@ -1,14 +1,16 @@
-use crate::renderer::Renderer;
-use crate::resources::load_model;
-use crate::texture::Texture;
-use crate::MAX_LIGHTS;
-use anyhow::Result;
-use bytemuck::{Pod, Zeroable};
-use glam::{Mat3, Mat4, Vec3};
 use std::collections::btree_map::{Iter, IterMut};
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Add, Range};
 use std::sync::Arc;
+
+use anyhow::Result;
+use bytemuck::{Pod, Zeroable};
+use glam::{Mat3, Mat4, Vec3};
+
+use crate::renderer::Renderer;
+use crate::resources::load_model;
+use crate::texture::Texture;
+use crate::MAX_LIGHTS;
 
 #[derive(Default)]
 pub struct GameObjectStore {
@@ -361,10 +363,10 @@ impl Default for Transform3D {
     }
 }
 
-impl<'a, 'b> Add<&'b Transform3D> for &'a Transform3D {
+impl<'a> Add<&'a Transform3D> for &Transform3D {
     type Output = Transform3D;
 
-    fn add(self, other: &'b Transform3D) -> Transform3D {
+    fn add(self, other: &'a Transform3D) -> Transform3D {
         Transform3D {
             position: self.position + other.position,
             rotation: self.rotation + other.rotation,
@@ -419,11 +421,11 @@ impl Default for LightUniform {
     }
 }
 
-// #[allow(dead_code)]
+#[allow(dead_code)]
 pub struct Material {
     pub name: String,
-    // diffuse_texture: Texture,
-    // normal_texture: Texture,
+    diffuse_texture: Texture,
+    normal_texture: Texture,
     bind_group: wgpu::BindGroup,
 }
 
@@ -494,8 +496,8 @@ impl Material {
 
         Self {
             name: String::from(name),
-            // diffuse_texture,
-            // normal_texture,
+            diffuse_texture,
+            normal_texture,
             bind_group,
         }
     }
