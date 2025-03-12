@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat3, Mat4, Vec3};
+
+pub use glam::{Mat3, Mat4, Quat, Vec3};
 
 use crate::renderer::Renderer;
 use crate::resources::load_model;

@@ -2,21 +2,13 @@
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 
-pub mod camera;
-pub mod debug;
-pub mod game_object;
-pub mod hdr;
-pub mod renderer;
-pub mod resources;
-pub mod texture;
-
 use std::borrow::BorrowMut;
 use std::sync::Arc;
 
 use game_object::GameObjectStore;
 use image::{ImageBuffer, Rgba};
-use instant::{Duration, Instant};
 use renderer::{RenderTarget, Renderer};
+use web_time::{Duration, Instant};
 use winit::dpi::LogicalSize;
 use winit::event::DeviceEvent;
 use winit::event_loop::EventLoopWindowTarget;
@@ -31,6 +23,14 @@ use winit::{
 use wasm_bindgen::prelude::*;
 
 use crate::camera::CameraController;
+
+pub mod camera;
+pub mod debug;
+pub mod game_object;
+pub mod hdr;
+pub mod renderer;
+pub mod resources;
+pub mod texture;
 
 const MAX_LIGHTS: usize = 128;
 const MAX_INSTANCES: usize = 131072;

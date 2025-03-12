@@ -192,40 +192,40 @@ pub fn load_model(filename: &str, renderer: &Renderer) -> Result<Model> {
 }
 
 pub fn load_string(filename: &str) -> Result<String> {
-    // cfg_if! {
-    //     if #[cfg(target_arch = "wasm32")] {
-    //         let url = format_url(filename);
-    //         let txt = reqwest::get(url)
-    //             .await?
-    //             .text()
-    //             .await?;
-    //     } else {
-    let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
-        .join("models")
-        .join(filename);
-    let txt = std::fs::read_to_string(path)?;
-    //     }
-    // }
+    cfg_if! {
+        if #[cfg(target_arch = "wasm32")] {
+            let url = format_url(filename);
+            let txt = reqwest::get(url)
+                .await?
+                .text()
+                .await?;
+        } else {
+            let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
+                .join("models")
+                .join(filename);
+            let txt = std::fs::read_to_string(path)?;
+        }
+    }
 
     Ok(txt)
 }
 
 pub fn load_binary(filename: &str) -> Result<Vec<u8>> {
-    // cfg_if! {
-    //     if #[cfg(target_arch = "wasm32")] {
-    //         let url = format_url(filename);
-    //         let data = reqwest::get(url)
-    //             .await?
-    //             .bytes()
-    //             .await?
-    //             .to_vec();
-    //     } else {
-    let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
-        .join("models")
-        .join(filename);
-    let data = std::fs::read(path)?;
-    //     }
-    // }
+    cfg_if! {
+        if #[cfg(target_arch = "wasm32")] {
+            let url = format_url(filename);
+            let data = reqwest::get(url)
+                .await?
+                .bytes()
+                .await?
+                .to_vec();
+        } else {
+            let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
+                .join("models")
+                .join(filename);
+            let data = std::fs::read(path)?;
+        }
+    }
 
     Ok(data)
 }

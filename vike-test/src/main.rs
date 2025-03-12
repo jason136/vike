@@ -1,10 +1,9 @@
 use std::{f32::consts::PI, sync::Arc, time::Duration};
 
-use glam::{Quat, Vec3};
 use image::{ImageBuffer, Rgba};
 use vike::{
     camera::CameraController,
-    game_object::{GameObjectStore, Transform3D},
+    game_object::{GameObjectStore, Quat, Transform3D, Vec3},
     renderer::Renderer,
     run_headless, run_windowed,
 };
