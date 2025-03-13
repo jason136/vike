@@ -1,7 +1,8 @@
 use anyhow::Result;
 use cfg_if::cfg_if;
+use futures_lite::io::{BufReader, Cursor};
 use glam::{Vec2, Vec3};
-use std::io::{BufReader, Cursor};
+use tobj::LoadError;
 use wgpu::util::DeviceExt;
 
 use crate::{
@@ -10,40 +11,41 @@ use crate::{
     texture::Texture,
 };
 
-pub fn load_texture(
+pub async fn load_texture(
     filename: &str,
     is_normal_map: bool,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Result<Texture> {
-    let data = load_binary(filename)?;
+    let data = load_binary(filename).await?;
     Texture::from_bytes(&data, filename, is_normal_map, device, queue)
 }
 
-pub fn load_model(filename: &str, renderer: &Renderer) -> Result<Model> {
-    let obj_text = load_string(filename)?;
+pub async fn load_model(filename: &str, renderer: &Renderer) -> Result<Model> {
+    let obj_text = load_string(filename).await?;
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
-    let (models, obj_materials) = tobj::load_obj_buf(
+    let (models, obj_materials) = tobj::futures::load_obj_buf(
         &mut obj_reader,
         &tobj::LoadOptions {
             triangulate: true,
             single_index: true,
             ..Default::default()
         },
-        |p| {
-            if let Some(mat_text) = p
-                .to_str()
-                .as_ref()
-                .and_then(|filename| load_string(filename).ok())
-            {
-                tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
-            } else {
-                Ok(Default::default())
+        |p| async move {
+            match p.to_str() {
+                Some(path) => {
+                    let mat_text = load_string(path)
+                        .await
+                        .map_err(|_| LoadError::GenericFailure)?;
+                    tobj::futures::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text))).await
+                }
+                None => Ok(Default::default()),
             }
         },
-    )?;
+    )
+    .await?;
 
     let mut max_mat_id = 0;
     let meshes = models
@@ -149,25 +151,19 @@ pub fn load_model(filename: &str, renderer: &Renderer) -> Result<Model> {
 
     let mut materials = Vec::new();
     for m in obj_materials? {
-        let diffuse_texture = m
-            .diffuse_texture
-            .as_ref()
-            .and_then(|filename| {
-                load_texture(filename, false, renderer.device(), renderer.queue()).ok()
-            })
-            .unwrap_or_else(|| {
-                Texture::default(false, renderer.device(), renderer.queue()).unwrap()
-            });
+        let diffuse_texture = match m.diffuse_texture.as_ref() {
+            Some(filename) => {
+                load_texture(filename, false, renderer.device(), renderer.queue()).await
+            }
+            None => Texture::default(false, renderer.device(), renderer.queue()),
+        }?;
 
-        let normal_texture = m
-            .normal_texture
-            .as_ref()
-            .and_then(|filename| {
-                load_texture(filename, true, renderer.device(), renderer.queue()).ok()
-            })
-            .unwrap_or_else(|| {
-                Texture::default(true, renderer.device(), renderer.queue()).unwrap()
-            });
+        let normal_texture = match m.normal_texture.as_ref() {
+            Some(filename) => {
+                load_texture(filename, true, renderer.device(), renderer.queue()).await
+            }
+            None => Texture::default(true, renderer.device(), renderer.queue()),
+        }?;
 
         materials.push(Material::new(
             renderer.device(),
@@ -191,7 +187,29 @@ pub fn load_model(filename: &str, renderer: &Renderer) -> Result<Model> {
     Ok(Model::new(filename, meshes, materials))
 }
 
-pub fn load_string(filename: &str) -> Result<String> {
+#[cfg(target_arch = "wasm32")]
+use std::sync::OnceLock;
+
+#[cfg(target_arch = "wasm32")]
+static BASE_URL: OnceLock<String> = OnceLock::new();
+
+#[cfg(target_arch = "wasm32")]
+pub fn set_base_url(url: &str) -> Result<(), &'static str> {
+    match BASE_URL.set(url.to_string()) {
+        Ok(_) => Ok(()),
+        Err(_) => Err("Base URL has already been set"),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn format_url(filename: &str) -> String {
+    match BASE_URL.get() {
+        Some(base) => format!("{}/{}", base, filename),
+        None => format!("http://localhost:8080/models/{}", filename),
+    }
+}
+
+pub async fn load_string(filename: &str) -> Result<String> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             let url = format_url(filename);
@@ -203,14 +221,14 @@ pub fn load_string(filename: &str) -> Result<String> {
             let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
                 .join("models")
                 .join(filename);
-            let txt = std::fs::read_to_string(path)?;
+            let txt = async_fs::read_to_string(path).await?;
         }
     }
 
     Ok(txt)
 }
 
-pub fn load_binary(filename: &str) -> Result<Vec<u8>> {
+pub async fn load_binary(filename: &str) -> Result<Vec<u8>> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             let url = format_url(filename);
@@ -223,7 +241,7 @@ pub fn load_binary(filename: &str) -> Result<Vec<u8>> {
             let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
                 .join("models")
                 .join(filename);
-            let data = std::fs::read(path)?;
+            let data = async_fs::read(path).await?;
         }
     }
 

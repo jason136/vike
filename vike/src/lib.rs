@@ -1,10 +1,9 @@
-#![feature(unboxed_closures)]
 #![feature(let_chains)]
-#![feature(type_alias_impl_trait)]
 
 use std::borrow::BorrowMut;
 use std::sync::Arc;
 
+use futures_lite::future::block_on;
 use game_object::GameObjectStore;
 use image::{ImageBuffer, Rgba};
 use renderer::{RenderTarget, Renderer};
@@ -18,9 +17,6 @@ use winit::{
     event_loop::EventLoop,
     window::WindowBuilder,
 };
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 
 use crate::camera::CameraController;
 
@@ -40,21 +36,44 @@ pub enum RenderMode {
     Headless,
 }
 
+pub trait WindowedVike {
+    fn setup(
+        &mut self,
+        game_objects: &mut GameObjectStore,
+        camera_controller: &mut CameraController,
+        renderer: &Renderer,
+    ) -> impl std::future::Future<Output = ()>;
+
+    fn update(
+        &mut self,
+        game_objects: &mut GameObjectStore,
+        camera_controller: &mut CameraController,
+        dt: Duration,
+    ) -> impl std::future::Future<Output = ()>;
+
+    fn window_event(
+        &mut self,
+        window: &Arc<Window>,
+        game_objects: &mut GameObjectStore,
+        camera_controller: &mut CameraController,
+        renderer: &mut Renderer,
+        event: &WindowEvent,
+        elwt: &EventLoopWindowTarget<()>,
+    );
+
+    fn device_event(
+        &mut self,
+        game_objects: &mut GameObjectStore,
+        camera_controller: &mut CameraController,
+        event: &DeviceEvent,
+    );
+}
+
 pub async fn run_windowed(
     title: &str,
     width: u32,
     height: u32,
-    setup_fn: impl Fn(&mut GameObjectStore, &mut CameraController, &Renderer),
-    update_fn: impl Fn(&mut GameObjectStore, &mut CameraController, Duration),
-    window_event_fn: impl Fn(
-        &Arc<Window>,
-        &mut GameObjectStore,
-        &mut CameraController,
-        &mut Renderer,
-        &WindowEvent,
-        &EventLoopWindowTarget<()>,
-    ),
-    device_event_fn: impl Fn(&mut GameObjectStore, &mut CameraController, DeviceEvent),
+    controller: &mut impl WindowedVike,
 ) {
     let event_loop = EventLoop::new().unwrap();
     let window = Arc::new(
@@ -90,7 +109,9 @@ pub async fn run_windowed(
     let mut game_objects = GameObjectStore::default();
     let mut camera_controller = CameraController::new(4.0, 0.6);
 
-    (setup_fn)(&mut game_objects, &mut camera_controller, &renderer);
+    controller
+        .setup(&mut game_objects, &mut camera_controller, &renderer)
+        .await;
 
     let mut last_instant = Instant::now();
 
@@ -108,7 +129,8 @@ pub async fn run_windowed(
                     let dt = now - last_instant;
                     last_instant = now;
 
-                    (update_fn)(&mut game_objects, &mut camera_controller, dt);
+                    block_on(controller.update(&mut game_objects, &mut camera_controller, dt));
+
                     camera_controller.update_camera(&mut renderer.camera, dt);
 
                     match renderer.render(&game_objects) {
@@ -120,7 +142,7 @@ pub async fn run_windowed(
                         Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
                     }
                 }
-                _ => window_event_fn(
+                _ => controller.window_event(
                     &window,
                     &mut game_objects,
                     &mut camera_controller,
@@ -130,26 +152,43 @@ pub async fn run_windowed(
                 ),
             },
             Event::DeviceEvent { event, .. } => {
-                device_event_fn(&mut game_objects, &mut camera_controller, event);
+                controller.device_event(&mut game_objects, &mut camera_controller, &event);
             }
             _ => (),
         })
         .unwrap();
 }
 
-pub async fn run_headless(
-    width: u32,
-    height: u32,
-    setup_fn: impl Fn(&mut GameObjectStore, &mut CameraController, &Renderer),
-    update_fn: impl Fn(&mut GameObjectStore, &mut CameraController, Duration),
-    frame_fn: impl Fn(ImageBuffer<Rgba<u8>, Vec<u8>>),
-) {
+pub trait HeadlessVike {
+    fn setup(
+        &mut self,
+        game_objects: &mut GameObjectStore,
+        camera_controller: &mut CameraController,
+        renderer: &Renderer,
+    ) -> impl std::future::Future<Output = ()>;
+
+    fn update(
+        &mut self,
+        game_objects: &mut GameObjectStore,
+        camera_controller: &mut CameraController,
+        dt: Duration,
+    ) -> impl std::future::Future<Output = ()>;
+
+    fn frame(
+        &mut self,
+        image_buffer: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ) -> impl std::future::Future<Output = ()>;
+}
+
+pub async fn run_headless(width: u32, height: u32, controller: &mut impl HeadlessVike) {
     let mut renderer = Renderer::new(RenderTarget::Headless { width, height }).await;
 
     let mut game_objects = GameObjectStore::default();
     let mut camera_controller = CameraController::new(4.0, 0.6);
 
-    (setup_fn)(&mut game_objects, &mut camera_controller, &renderer);
+    controller
+        .setup(&mut game_objects, &mut camera_controller, &renderer)
+        .await;
 
     let mut last_instant = Instant::now();
 
@@ -158,12 +197,16 @@ pub async fn run_headless(
         let dt = now - last_instant;
         last_instant = now;
 
-        (update_fn)(&mut game_objects, &mut camera_controller, dt);
+        controller
+            .update(&mut game_objects, &mut camera_controller, dt)
+            .await;
 
         camera_controller.update_camera(&mut renderer.camera, dt);
 
         renderer.render(&game_objects).unwrap();
 
-        (frame_fn)(renderer.image_buffer().await.unwrap());
+        controller
+            .frame(renderer.image_buffer().await.unwrap())
+            .await;
     }
 }

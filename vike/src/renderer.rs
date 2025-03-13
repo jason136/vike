@@ -6,6 +6,7 @@ use wgpu::util::DeviceExt;
 use winit::{event::WindowEvent, window::Window};
 
 use crate::{
+    MAX_INSTANCES,
     camera::{Camera, CameraUniform, Projection},
     debug::Debug,
     game_object::{
@@ -14,7 +15,6 @@ use crate::{
     },
     hdr::HdrPipeline,
     texture::Texture,
-    MAX_INSTANCES,
 };
 
 pub enum RenderTarget {
@@ -589,11 +589,10 @@ impl Renderer {
                 }
             }
             RenderOutput::Buffer {
-                width,
-                height,
                 padded_bytes_per_row,
                 texture,
                 buffer,
+                ..
             } => {
                 encoder.copy_texture_to_buffer(
                     wgpu::ImageCopyTexture {

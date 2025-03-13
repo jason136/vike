@@ -6,12 +6,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 
-pub use glam::{Mat3, Mat4, Quat, Vec3};
+pub use glam::*;
 
+use crate::MAX_LIGHTS;
 use crate::renderer::Renderer;
 use crate::resources::load_model;
 use crate::texture::Texture;
-use crate::MAX_LIGHTS;
 
 #[derive(Default)]
 pub struct GameObjectStore {
@@ -38,11 +38,11 @@ pub struct Array {
 }
 
 impl GameObjectStore {
-    pub fn load_model(&mut self, filename: &str, renderer: &Renderer) -> Result<Arc<Model>> {
+    pub async fn load_model(&mut self, filename: &str, renderer: &Renderer) -> Result<Arc<Model>> {
         if let Some(model) = self.models.get(filename) {
             Ok(model.clone())
         } else {
-            let model = Arc::new(load_model(filename, renderer)?);
+            let model = Arc::new(load_model(filename, renderer).await?);
             self.models.insert(filename.to_string(), model.clone());
             Ok(model)
         }
@@ -445,6 +445,9 @@ pub struct Model {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
 }
+
+unsafe impl Send for Model {}
+unsafe impl Sync for Model {}
 
 impl Mesh {
     pub fn new(
