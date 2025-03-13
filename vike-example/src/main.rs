@@ -169,6 +169,7 @@ impl HeadlessVike for Vike {
     async fn frame(&mut self, image_buffer: ImageBuffer<Rgba<u8>, Vec<u8>>) {
         println!("saving image");
         image_buffer.save("image.png").unwrap();
+        unimplemented!()
     }
 }
 

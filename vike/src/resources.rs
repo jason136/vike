@@ -202,21 +202,44 @@ pub fn set_base_url(url: &str) -> Result<(), &'static str> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn format_url(filename: &str) -> String {
-    match BASE_URL.get() {
+async fn js_fetch(filename: &str) -> Result<web_sys::Response> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    let url = match BASE_URL.get() {
         Some(base) => format!("{}/{}", base, filename),
         None => format!("http://localhost:8080/models/{}", filename),
+    };
+
+    let window = web_sys::window().ok_or_else(|| anyhow::anyhow!("JS window not found"))?;
+    let resp_value = JsFuture::from(window.fetch_with_str(&url))
+        .await
+        .map_err(|e| anyhow::anyhow!("JS fetch error: {:?}", e))?;
+
+    let resp: web_sys::Response = resp_value
+        .dyn_into()
+        .map_err(|_| anyhow::anyhow!("JS fetch not a Response"))?;
+
+    if !resp.ok() {
+        return Err(anyhow::anyhow!("JS fetch HTTP error: {}", resp.status()));
     }
+
+    Ok(resp)
 }
 
 pub async fn load_string(filename: &str) -> Result<String> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
-            let url = format_url(filename);
-            let txt = reqwest::get(url)
-                .await?
-                .text()
-                .await?;
+            use wasm_bindgen_futures::JsFuture;
+
+            let resp = js_fetch(filename).await?;
+            let text = JsFuture::from(resp.text()
+                .map_err(|e| anyhow::anyhow!("JS load text error: {:?}", e))?)
+                .await
+                .map_err(|e| anyhow::anyhow!("JS await error: {:?}", e))?;
+
+            let txt = text.as_string()
+                .ok_or_else(|| anyhow::anyhow!("JS response not a string"))?;
         } else {
             let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
                 .join("models")
@@ -231,12 +254,16 @@ pub async fn load_string(filename: &str) -> Result<String> {
 pub async fn load_binary(filename: &str) -> Result<Vec<u8>> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
-            let url = format_url(filename);
-            let data = reqwest::get(url)
-                .await?
-                .bytes()
-                .await?
-                .to_vec();
+            use wasm_bindgen_futures::JsFuture;
+
+            let resp = js_fetch(filename).await?;
+            let array_buffer = JsFuture::from(resp.array_buffer()
+                .map_err(|e| anyhow::anyhow!("JS load buffer error: {:?}", e))?)
+                .await
+                .map_err(|e| anyhow::anyhow!("JS await error: {:?}", e))?;
+
+            let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+            let data = uint8_array.to_vec();
         } else {
             let path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap())
                 .join("models")
