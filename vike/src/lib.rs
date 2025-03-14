@@ -1,8 +1,7 @@
-#![feature(let_chains)]
-
 use std::borrow::BorrowMut;
 use std::sync::Arc;
 
+use cfg_if::cfg_if;
 use futures_lite::future::block_on;
 use game_object::GameObjectStore;
 use image::{ImageBuffer, Rgba};
@@ -181,7 +180,14 @@ pub trait HeadlessVike {
 }
 
 pub async fn run_headless(width: u32, height: u32, controller: &mut impl HeadlessVike) {
-    let mut renderer = Renderer::new(RenderTarget::Headless { width, height }).await;
+    cfg_if! {
+        if #[cfg(target_arch = "wasm32")] {
+            let canvas = web_sys::OffscreenCanvas::new(width, height).unwrap();
+            let mut renderer = Renderer::new(RenderTarget::Headless { width, height, canvas }).await;
+        } else {
+            let mut renderer = Renderer::new(RenderTarget::Headless { width, height }).await;
+        }
+    }
 
     let mut game_objects = GameObjectStore::default();
     let mut camera_controller = CameraController::new(4.0, 0.6);

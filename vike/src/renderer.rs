@@ -1,4 +1,5 @@
 use anyhow::Result;
+use cfg_if::cfg_if;
 use glam::Vec3;
 use image::{ImageBuffer, Rgba};
 use std::sync::Arc;
@@ -19,7 +20,12 @@ use crate::{
 
 pub enum RenderTarget {
     Window(Arc<Window>),
-    Headless { width: u32, height: u32 },
+    Headless {
+        width: u32,
+        height: u32,
+        #[cfg(target_arch = "wasm32")]
+        canvas: web_sys::OffscreenCanvas,
+    },
 }
 
 pub enum RenderOutput {
@@ -62,7 +68,10 @@ pub struct Renderer {
 impl Renderer {
     pub async fn new(target: RenderTarget) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            #[cfg(not(target_arch = "wasm32"))]
+            backends: wgpu::Backends::PRIMARY,
+            #[cfg(target_arch = "wasm32")]
+            backends: wgpu::Backends::GL,
             ..Default::default()
         });
 
@@ -72,7 +81,23 @@ impl Renderer {
                 let size = window.inner_size();
                 (Some(surface), Some(window), (size.width, size.height))
             }
-            RenderTarget::Headless { width, height } => (None, None, (width, height)),
+            RenderTarget::Headless {
+                width,
+                height,
+                #[cfg(target_arch = "wasm32")]
+                canvas,
+            } => {
+                cfg_if! {
+                    if #[cfg(target_arch = "wasm32")] {
+                        use wgpu::SurfaceTarget;
+                        let surface = Some(instance.create_surface(SurfaceTarget::OffscreenCanvas(canvas)).unwrap());
+                    } else {
+                        let surface = None;
+                    }
+                }
+
+                (surface, None, (width, height))
+            }
         };
 
         let adapter = instance
@@ -100,9 +125,7 @@ impl Renderer {
             .await
             .unwrap();
 
-        let (output, format) = if let Some(surface) = surface
-            && let Some(window) = window
-        {
+        let (output, format) = if let (Some(surface), Some(window)) = (surface, window) {
             let surface_caps = surface.get_capabilities(&adapter);
 
             let format = surface_caps

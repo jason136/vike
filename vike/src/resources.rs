@@ -205,16 +205,29 @@ pub fn set_base_url(url: &str) -> Result<(), &'static str> {
 async fn js_fetch(filename: &str) -> Result<web_sys::Response> {
     use wasm_bindgen::JsCast;
     use wasm_bindgen_futures::JsFuture;
+    use web_sys::js_sys;
 
     let url = match BASE_URL.get() {
         Some(base) => format!("{}/{}", base, filename),
         None => format!("http://localhost:8080/models/{}", filename),
     };
 
-    let window = web_sys::window().ok_or_else(|| anyhow::anyhow!("JS window not found"))?;
-    let resp_value = JsFuture::from(window.fetch_with_str(&url))
-        .await
-        .map_err(|e| anyhow::anyhow!("JS fetch error: {:?}", e))?;
+    let global = js_sys::global();
+
+    let fetch_fn = js_sys::Function::from(
+        js_sys::Reflect::get(&global, &"fetch".into())
+            .map_err(|_| anyhow::anyhow!("fetch not found in global scope"))?,
+    );
+
+    let resp_value = JsFuture::from(
+        fetch_fn
+            .call1(&global, &url.into())
+            .map_err(|e| anyhow::anyhow!("JS fetch call error: {:?}", e))?
+            .dyn_into::<js_sys::Promise>()
+            .map_err(|_| anyhow::anyhow!("JS fetch did not return a Promise"))?,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("JS fetch error: {:?}", e))?;
 
     let resp: web_sys::Response = resp_value
         .dyn_into()
@@ -254,6 +267,7 @@ pub async fn load_string(filename: &str) -> Result<String> {
 pub async fn load_binary(filename: &str) -> Result<Vec<u8>> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
+            use web_sys::js_sys;
             use wasm_bindgen_futures::JsFuture;
 
             let resp = js_fetch(filename).await?;

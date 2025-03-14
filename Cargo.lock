@@ -1548,7 +1548,6 @@ dependencies = [
  "getrandom",
  "glam",
  "image",
- "js-sys",
  "log",
  "tobj",
  "wasm-bindgen",
